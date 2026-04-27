@@ -71,11 +71,12 @@ Deno.serve(async (req) => {
     runtimeConfig: config,
   });
 
-  const sendResult = decision.replyText && !lead.do_not_contact && !lead.removed_by_request
-    ? await sendWhatsAppText(lead.phone, decision.replyText)
-    : { ok: false, error: 'Suppressed or no reply' };
+  const canSend = decision.sendMode === 'freeform' && !!decision.replyText && !lead.do_not_contact && !lead.removed_by_request;
+  const sendResult = canSend
+    ? await sendWhatsAppText(lead.phone, decision.replyText as string)
+    : { ok: false, error: 'Suppressed, invalid, or no-send decision' };
 
-  if (decision.replyText && sendResult.ok) {
+  if (canSend && sendResult.ok) {
     await supabase.from('messages').insert({
       conversation_id: conversationId,
       lead_id: leadId,
@@ -95,9 +96,12 @@ Deno.serve(async (req) => {
     }, conversationId);
 
     const nextScore = Math.max(0, Math.min(100, Number(lead.lead_score || 0) + decision.scoreDelta));
+    const safeStatus = decision.leadStatusUpdate || lead.lead_status;
+    const safeHeat = decision.leadHeatUpdate || lead.lead_heat;
+
     await updateLeadTimestamps(supabase, leadId, {
-      lead_status: decision.leadStatusUpdate || lead.lead_status,
-      lead_heat: decision.leadHeatUpdate || lead.lead_heat,
+      lead_status: safeStatus,
+      lead_heat: safeHeat,
       lead_score: nextScore,
       last_message_at: new Date().toISOString(),
       last_outbound_at: new Date().toISOString(),

@@ -2,6 +2,7 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import type { AiDecisionContext, AiDecisionOutput } from './ai-contract.ts';
 import { buildAiSystemPrompt, buildAiUserPrompt } from './ai-prompt.ts';
 import { decidePlaceholderReply } from './placeholder-brain.ts';
+import { validateAiDecision } from './ai-validation.ts';
 
 const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY') || '';
 const OPENAI_MODEL = Deno.env.get('OPENAI_MODEL') || 'gpt-5-mini';
@@ -34,8 +35,9 @@ export async function runAiDecision(
   };
 
   if (!OPENAI_API_KEY) {
-    await logAiDecision(supabase, context, placeholderOutput, 'placeholder_no_openai_key');
-    return placeholderOutput;
+    const validated = validateAiDecision(placeholderOutput);
+    await logAiDecision(supabase, context, validated, 'placeholder_no_openai_key');
+    return validated;
   }
 
   try {
@@ -57,15 +59,17 @@ export async function runAiDecision(
 
     if (!response.ok) {
       const errorText = await response.text();
-      await logAiDecision(supabase, context, placeholderOutput, `openai_error:${response.status}:${errorText.slice(0, 200)}`);
-      return placeholderOutput;
+      const validated = validateAiDecision(placeholderOutput);
+      await logAiDecision(supabase, context, validated, `openai_error:${response.status}:${errorText.slice(0, 200)}`);
+      return validated;
     }
 
     const json = await response.json();
     const content = json.choices?.[0]?.message?.content;
     if (!content) {
-      await logAiDecision(supabase, context, placeholderOutput, 'openai_empty_content');
-      return placeholderOutput;
+      const validated = validateAiDecision(placeholderOutput);
+      await logAiDecision(supabase, context, validated, 'openai_empty_content');
+      return validated;
     }
 
     const parsed = JSON.parse(content) as Partial<AiDecisionOutput>;
@@ -75,11 +79,13 @@ export async function runAiDecision(
       sendMode: parsed.sendMode || placeholderOutput.sendMode,
     };
 
-    await logAiDecision(supabase, context, merged, 'openai_success');
-    return merged;
+    const validated = validateAiDecision(merged);
+    await logAiDecision(supabase, context, validated, 'openai_success');
+    return validated;
   } catch (error) {
-    await logAiDecision(supabase, context, placeholderOutput, `openai_exception:${String(error)}`);
-    return placeholderOutput;
+    const validated = validateAiDecision(placeholderOutput);
+    await logAiDecision(supabase, context, validated, `openai_exception:${String(error)}`);
+    return validated;
   }
 }
 
