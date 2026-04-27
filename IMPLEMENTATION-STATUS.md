@@ -44,6 +44,9 @@ The repository now contains:
 - webhook/orchestrator now use shared service helpers instead of embedding all logic inline
 - provider status callback scaffold in `supabase/functions/provider-status-webhook/index.ts`
 - admin/operator action scaffold in `supabase/functions/admin-actions/index.ts`
+- dashboard data scaffold in `supabase/functions/dashboard-summary/index.ts`
+- lead detail data scaffold in `supabase/functions/lead-detail/index.ts`
+- shared operator-side view-model helpers in `lib/view-models/*`
 
 ## What is still missing
 This is still not a production-ready application.
@@ -58,11 +61,12 @@ The following still need implementation:
 - richer payment matching and onboarding flows
 - deeper idempotency and retry discipline for tasks/queues/webhooks
 - auth protection around operator/admin action functions
+- richer dashboard aggregation and filtering
 
 ## Recommended next coding targets
 1. finalize schema migration and auth/profile model
 2. replace placeholder brain with structured AI runtime
 3. add auth protection and deeper idempotency around webhook/task/action creation
-4. add richer queue/handoff services and Mia action functions
-5. implement dashboard and lead detail skeleton
+4. implement actual web dashboard/leads/detail views on top of the new data endpoints
+5. add richer queue/handoff services and Mia action functions
 6. add configuration-backed runtime rules and admin config surfaces
