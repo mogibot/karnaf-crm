@@ -41,6 +41,10 @@ The repository now contains:
 - config loader in `supabase/functions/_shared/config-service.ts`
 - follow-up task helper in `supabase/functions/_shared/task-service.ts`
 - basic message idempotency helper in `supabase/functions/_shared/idempotency.ts`
+- AI contract/prompt/decision scaffolds in:
+  - `supabase/functions/_shared/ai-contract.ts`
+  - `supabase/functions/_shared/ai-prompt.ts`
+  - `supabase/functions/_shared/ai-decision-service.ts`
 - webhook/orchestrator now use shared service helpers instead of embedding all logic inline
 - provider status callback scaffold in `supabase/functions/provider-status-webhook/index.ts`
 - admin/operator action scaffold in `supabase/functions/admin-actions/index.ts`
@@ -66,7 +70,7 @@ This is still not a production-ready application.
 The following still need implementation:
 - full frontend routing, components, styling, and auth
 - full Supabase migrations validated against auth/users needs
-- real AI model invocation and structured decision engine
+- robust production-grade AI prompting/validation/guardrails
 - richer queue resolution / Mia action services
 - full handoff package generation and return-to-AI controls
 - RLS policies
@@ -81,7 +85,7 @@ The following still need implementation:
 
 ## Recommended next coding targets
 1. finalize schema migration and auth/profile model
-2. replace placeholder brain with structured AI runtime
+2. harden the AI runtime with stronger output validation and policy rules
 3. add auth protection and deeper idempotency around webhook/task/action creation
 4. deepen the web shell into styled dashboard/leads/detail/queue components and routing
 5. add richer queue/handoff services and Mia action functions

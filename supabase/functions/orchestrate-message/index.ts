@@ -3,9 +3,9 @@ import { sendWhatsAppText } from '../_shared/whatsapp-provider.ts';
 import { getServiceSupabase } from '../_shared/supabase.ts';
 import { ensurePendingQueueItem } from '../_shared/queue-service.ts';
 import { logLeadEvent, updateLeadTimestamps } from '../_shared/lead-service.ts';
-import { decidePlaceholderReply } from '../_shared/placeholder-brain.ts';
 import { getRuntimeConfig } from '../_shared/config-service.ts';
 import { createLeadTask } from '../_shared/task-service.ts';
+import { runAiDecision } from '../_shared/ai-decision-service.ts';
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -46,15 +46,29 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: messagesError.message }, 500);
   }
 
-  const lastInbound = recentMessages?.find((m) => m.sender_type === 'lead');
-  const inboundText = lastInbound?.content_text || '';
+  const normalizedMessages = (recentMessages || []).map((m) => ({
+    senderType: String(m.sender_type || ''),
+    contentText: (m.content_text as string | null) || null,
+    createdAt: String(m.created_at || ''),
+  }));
 
-  const decision = decidePlaceholderReply({
-    inboundText,
-    fullName: lead.full_name,
-    source: lead.source,
-    currentStatus: lead.lead_status,
-    currentHeat: lead.lead_heat,
+  const decision = await runAiDecision(supabase, {
+    lead: {
+      id: String(lead.id),
+      fullName: lead.full_name,
+      phone: lead.phone,
+      source: lead.source,
+      status: lead.lead_status,
+      heat: lead.lead_heat,
+      score: Number(lead.lead_score || 0),
+      ownershipMode: lead.ownership_mode,
+      paymentStatus: lead.payment_status,
+      doNotContact: !!lead.do_not_contact,
+      removedByRequest: !!lead.removed_by_request,
+      conversationSummary: lead.conversation_summary,
+    },
+    recentMessages: normalizedMessages,
+    runtimeConfig: config,
   });
 
   const sendResult = decision.replyText && !lead.do_not_contact && !lead.removed_by_request
@@ -125,6 +139,6 @@ Deno.serve(async (req) => {
     decision,
     sendResult,
     config,
-    note: 'Still placeholder orchestration. Replace with structured AI runtime next.',
+    note: 'AI orchestration scaffold is now wired, with placeholder fallback when model access is unavailable or fails.',
   });
 });
