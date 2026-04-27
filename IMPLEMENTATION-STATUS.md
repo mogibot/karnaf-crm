@@ -46,6 +46,8 @@ The repository now contains:
 - admin/operator action scaffold in `supabase/functions/admin-actions/index.ts`
 - dashboard data scaffold in `supabase/functions/dashboard-summary/index.ts`
 - lead detail data scaffold in `supabase/functions/lead-detail/index.ts`
+- leads list data scaffold in `supabase/functions/leads-list/index.ts`
+- queue list data scaffold in `supabase/functions/queue-list/index.ts`
 - shared operator-side view-model helpers in `lib/view-models/*`
 
 ## What is still missing
@@ -62,11 +64,12 @@ The following still need implementation:
 - deeper idempotency and retry discipline for tasks/queues/webhooks
 - auth protection around operator/admin action functions
 - richer dashboard aggregation and filtering
+- actual typed frontend data layer and UI components
 
 ## Recommended next coding targets
 1. finalize schema migration and auth/profile model
 2. replace placeholder brain with structured AI runtime
 3. add auth protection and deeper idempotency around webhook/task/action creation
-4. implement actual web dashboard/leads/detail views on top of the new data endpoints
+4. implement actual web dashboard/leads/detail/queue views on top of the new data endpoints
 5. add richer queue/handoff services and Mia action functions
 6. add configuration-backed runtime rules and admin config surfaces
