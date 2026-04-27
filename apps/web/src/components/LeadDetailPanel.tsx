@@ -1,10 +1,24 @@
+import { LeadActions } from './LeadActions';
+
 interface LeadDetailPanelProps {
   lead: Record<string, unknown> | null;
   messages: Array<Record<string, unknown>>;
   queueItems: Array<Record<string, unknown>>;
+  onAssignToMia?: () => void;
+  onReturnToAi?: () => void;
+  onMarkPhoneEscalation?: () => void;
+  onMarkDnc?: () => void;
 }
 
-export function LeadDetailPanel({ lead, messages, queueItems }: LeadDetailPanelProps) {
+export function LeadDetailPanel({
+  lead,
+  messages,
+  queueItems,
+  onAssignToMia,
+  onReturnToAi,
+  onMarkPhoneEscalation,
+  onMarkDnc,
+}: LeadDetailPanelProps) {
   if (!lead) {
     return <p style={{ color: '#666' }}>בחר ליד כדי לראות פרטים</p>;
   }
@@ -12,6 +26,13 @@ export function LeadDetailPanel({ lead, messages, queueItems }: LeadDetailPanelP
   return (
     <div style={{ border: '1px solid #ddd', borderRadius: 12, padding: 16 }}>
       <h3 style={{ marginTop: 0 }}>{String(lead.full_name || 'ליד')}</h3>
+      <LeadActions
+        leadId={String(lead.id || '') || null}
+        onAssignToMia={() => onAssignToMia?.()}
+        onReturnToAi={() => onReturnToAi?.()}
+        onMarkPhoneEscalation={() => onMarkPhoneEscalation?.()}
+        onMarkDnc={() => onMarkDnc?.()}
+      />
       <p>טלפון: {String(lead.phone || '—')}</p>
       <p>סטטוס: {String(lead.lead_status || '—')}</p>
       <p>חום: {String(lead.lead_heat || '—')}</p>

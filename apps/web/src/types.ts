@@ -26,3 +26,8 @@ export interface QueueListResponse {
   ok: boolean;
   queueItems: Array<Record<string, unknown>>;
 }
+
+export interface AdminActionResponse {
+  ok: boolean;
+  action: string;
+}

@@ -59,6 +59,7 @@ The repository now contains:
 - package/tsconfig updated for React + Vite groundwork
 - basic starter components in `apps/web/src/components/*`
 - lead-detail fetch wiring from the frontend into the backend scaffold
+- basic top navigation and lead action triggers wired to backend admin actions
 
 ## What is still missing
 This is still not a production-ready application.
@@ -76,6 +77,7 @@ The following still need implementation:
 - richer dashboard aggregation and filtering
 - typed end-to-end mapping between backend rows and frontend view models
 - usable visual design and component system
+- real optimistic refresh/update behavior after operator actions
 
 ## Recommended next coding targets
 1. finalize schema migration and auth/profile model

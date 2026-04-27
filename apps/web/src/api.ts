@@ -1,4 +1,5 @@
 import type {
+  AdminActionResponse,
   DashboardSummaryResponse,
   LeadDetailResponse,
   LeadsListResponse,
@@ -29,4 +30,20 @@ export function fetchQueueList() {
 
 export function fetchLeadDetail(leadId: string) {
   return fetchJson<LeadDetailResponse>(`/lead-detail?leadId=${encodeURIComponent(leadId)}`);
+}
+
+export async function postAdminAction(payload: Record<string, unknown>) {
+  const response = await fetch(`${baseUrl}/admin-actions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Admin action failed: ${response.status}`);
+  }
+
+  return response.json() as Promise<AdminActionResponse>;
 }
