@@ -3,6 +3,7 @@ import { normalizeIsraeliPhone } from '../_shared/phone.ts';
 import { normalizeProviderInbound } from '../_shared/whatsapp-provider.ts';
 import { getServiceSupabase } from '../_shared/supabase.ts';
 import { ensureConversation, ensureLeadForPhone, logLeadEvent, updateLeadTimestamps } from '../_shared/lead-service.ts';
+import { messageAlreadyLogged } from '../_shared/idempotency.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -39,6 +40,11 @@ Deno.serve(async (req) => {
 
   const phone = normalizeIsraeliPhone(normalized.phone) || normalized.phone;
   const supabase = getServiceSupabase();
+
+  const alreadyLogged = await messageAlreadyLogged(supabase, normalized.providerMessageId);
+  if (alreadyLogged) {
+    return jsonResponse({ ok: true, skipped: true, reason: 'duplicate_provider_message_id' });
+  }
 
   const lead = await ensureLeadForPhone(supabase, {
     phone,
