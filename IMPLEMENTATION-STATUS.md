@@ -50,10 +50,18 @@ The repository now contains:
 - queue list data scaffold in `supabase/functions/queue-list/index.ts`
 - shared operator-side view-model helpers in `lib/view-models/*`
 
+## Frontend starter shell added
+- typed frontend response contracts in `apps/web/src/types.ts`
+- lightweight API client in `apps/web/src/api.ts`
+- starter React app shell in `apps/web/src/App.tsx`
+- app entrypoint in `apps/web/src/main.tsx`
+- starter HTML shell in `apps/web/index.html`
+- package/tsconfig updated for React + Vite groundwork
+
 ## What is still missing
 This is still not a production-ready application.
 The following still need implementation:
-- real frontend app
+- full frontend routing, components, styling, and auth
 - full Supabase migrations validated against auth/users needs
 - real AI model invocation and structured decision engine
 - richer queue resolution / Mia action services
@@ -64,12 +72,12 @@ The following still need implementation:
 - deeper idempotency and retry discipline for tasks/queues/webhooks
 - auth protection around operator/admin action functions
 - richer dashboard aggregation and filtering
-- actual typed frontend data layer and UI components
+- typed end-to-end mapping between backend rows and frontend view models
 
 ## Recommended next coding targets
 1. finalize schema migration and auth/profile model
 2. replace placeholder brain with structured AI runtime
 3. add auth protection and deeper idempotency around webhook/task/action creation
-4. implement actual web dashboard/leads/detail/queue views on top of the new data endpoints
+4. deepen the web shell into dashboard/leads/detail/queue components
 5. add richer queue/handoff services and Mia action functions
 6. add configuration-backed runtime rules and admin config surfaces

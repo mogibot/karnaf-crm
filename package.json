@@ -6,9 +6,18 @@
   "scripts": {
     "build": "echo build placeholder",
     "lint": "echo lint placeholder",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "web:dev": "vite apps/web",
+    "web:build": "vite build apps/web"
+  },
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
   },
   "devDependencies": {
-    "typescript": "^5.8.3"
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "typescript": "^5.8.3",
+    "vite": "^7.0.0"
   }
 }
