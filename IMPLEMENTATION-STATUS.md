@@ -24,23 +24,32 @@ The repository now contains:
 - initial schema migration skeleton in `supabase/migrations/001_initial_schema.sql`
 - function layout placeholders in `supabase/functions/README.md`
 
+## Runtime scaffolds added
+- shared CORS helper in `supabase/functions/_shared/cors.ts`
+- phone normalization helpers in `supabase/functions/_shared/phone.ts`
+- provider message types in `supabase/functions/_shared/provider-types.ts`
+- initial provider transport implementation in `supabase/functions/_shared/whatsapp-provider.ts`
+- inbound webhook scaffold in `supabase/functions/whatsapp-webhook/index.ts`
+- placeholder orchestration runtime in `supabase/functions/orchestrate-message/index.ts`
+- payment ingestion scaffold in `supabase/functions/payment-webhook/index.ts`
+
 ## What is still missing
-This is not yet a working application.
+This is still not a production-ready application.
 The following still need implementation:
 - real frontend app
-- real Supabase migrations validated against auth/users needs
-- actual provider adapter implementation
-- actual orchestration runtime
-- actual model invocation layer
-- real queue services
-- payment webhook integration
+- full Supabase migrations validated against auth/users needs
+- robust provider callback/status handling
+- real AI model invocation and structured decision engine
+- queue creation/resolution services
+- handoff package generation and Mia actions
 - RLS policies
-- deployment wiring
+- deployment wiring and env setup
+- richer payment matching and onboarding flows
 
 ## Recommended next coding targets
 1. finalize schema migration and auth/profile model
-2. implement WhatsApp provider adapter
-3. implement inbound webhook function
-4. implement orchestrate-message function
+2. replace placeholder orchestration with structured AI runtime
+3. add queue/handoff creation logic
+4. add provider status callback handling and retries
 5. implement lead repository/service layer
 6. implement dashboard and lead detail skeleton
