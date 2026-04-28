@@ -1,0 +1,81 @@
+project_id = "karnaf-crm"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[studio]
+enabled = true
+port = 54323
+
+[auth]
+enabled = true
+site_url = "http://localhost:5173"
+additional_redirect_urls = ["http://localhost:5173"]
+jwt_expiry = 3600
+enable_signup = false
+
+[auth.email]
+enable_confirmations = false
+
+[functions.whatsapp-webhook]
+verify_jwt = false
+
+[functions.payment-webhook]
+verify_jwt = false
+
+[functions.provider-status-webhook]
+verify_jwt = false
+
+[functions.leads-intake]
+verify_jwt = false
+
+[functions.sla-worker]
+verify_jwt = false
+
+[functions.orchestrate-message]
+verify_jwt = true
+
+[functions.admin-actions]
+verify_jwt = true
+
+[functions.send-reply]
+verify_jwt = true
+
+[functions.queue-resolve]
+verify_jwt = true
+
+[functions.dashboard-summary]
+verify_jwt = true
+
+[functions.lead-detail]
+verify_jwt = true
+
+[functions.leads-list]
+verify_jwt = true
+
+[functions.queue-list]
+verify_jwt = true
+
+[functions.nightly-jobs]
+verify_jwt = false
+
+[functions.analytics-summary]
+verify_jwt = true
+
+[functions.users-manage]
+verify_jwt = true
+
+[functions.prompt-variants]
+verify_jwt = true
+
+[functions.email-webhook]
+verify_jwt = false
