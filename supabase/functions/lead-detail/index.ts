@@ -1,46 +1,41 @@
+import { jsonResponse, preflight } from '../_shared/cors.ts';
 import { getServiceSupabase } from '../_shared/supabase.ts';
-import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
+import { AuthError, requireStaff } from '../_shared/auth.ts';
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
-  }
+  const pre = preflight(req);
+  if (pre) return pre;
+  if (req.method !== 'GET') return jsonResponse(req, { error: 'Method not allowed' }, 405);
 
-  if (req.method !== 'GET') {
-    return jsonResponse({ error: 'Method not allowed' }, 405);
+  try { await requireStaff(req); } catch (err) {
+    if (err instanceof AuthError) return jsonResponse(req, { error: err.message }, err.status);
+    throw err;
   }
 
   const url = new URL(req.url);
   const leadId = url.searchParams.get('leadId');
-
-  if (!leadId) {
-    return jsonResponse({ error: 'Missing leadId' }, 400);
-  }
+  if (!leadId) return jsonResponse(req, { error: 'Missing leadId' }, 400);
 
   const supabase = getServiceSupabase();
 
-  const [leadRes, messagesRes, queueRes] = await Promise.all([
+  const [leadRes, conversationsRes, messagesRes, queueRes, tasksRes, eventsRes] = await Promise.all([
     supabase.from('leads').select('*').eq('id', leadId).single(),
-    supabase.from('messages').select('*').eq('lead_id', leadId).order('created_at', { ascending: true }).limit(100),
-    supabase.from('work_queue').select('*').eq('lead_id', leadId).order('created_at', { ascending: false }).limit(20),
+    supabase.from('conversations').select('*').eq('lead_id', leadId),
+    supabase.from('messages').select('*').eq('lead_id', leadId).order('created_at', { ascending: true }).limit(200),
+    supabase.from('work_queue').select('*').eq('lead_id', leadId).order('created_at', { ascending: false }).limit(50),
+    supabase.from('lead_tasks').select('*').eq('lead_id', leadId).order('created_at', { ascending: false }).limit(50),
+    supabase.from('lead_events').select('*').eq('lead_id', leadId).order('created_at', { ascending: false }).limit(100),
   ]);
 
-  if (leadRes.error) {
-    return jsonResponse({ error: leadRes.error.message }, 404);
-  }
+  if (leadRes.error) return jsonResponse(req, { error: leadRes.error.message }, 404);
 
-  if (messagesRes.error) {
-    return jsonResponse({ error: messagesRes.error.message }, 500);
-  }
-
-  if (queueRes.error) {
-    return jsonResponse({ error: queueRes.error.message }, 500);
-  }
-
-  return jsonResponse({
+  return jsonResponse(req, {
     ok: true,
     lead: leadRes.data,
-    messages: messagesRes.data || [],
-    queueItems: queueRes.data || [],
+    conversations: conversationsRes.data ?? [],
+    messages: messagesRes.data ?? [],
+    queueItems: queueRes.data ?? [],
+    tasks: tasksRes.data ?? [],
+    events: eventsRes.data ?? [],
   });
 });

@@ -1,35 +1,46 @@
+// Shared AI input/output contract. The decision service receives a
+// pre-assembled context, picks a playbook, calls the model, validates the
+// structured output, and returns a contract-shaped action object the
+// orchestrator executes.
+
+export type SendMode = 'freeform' | 'template' | 'manual_only' | 'no_send';
+
+export interface AiLeadContext {
+  id: string;
+  fullName: string | null;
+  phone: string | null;
+  source: string;
+  status: string;
+  heat: string;
+  score: number;
+  ownershipMode: string;
+  paymentStatus: string | null;
+  doNotContact: boolean;
+  removedByRequest: boolean;
+  conversationSummary: string | null;
+  lastInboundAt: string | null;
+  lastOutboundAt: string | null;
+}
+
+export interface AiRecentMessage {
+  senderType: string;
+  contentText: string | null;
+  createdAt: string;
+}
+
+export interface AiRuntimeConfig {
+  activeHours: { start: string; end: string; timezone: string };
+  followUpDelays: { firstResponseMinutes: number; nurtureHours: number; paymentPendingHours: number };
+  product: { code: string; displayName: string; priceMinIls: number; priceTypicalIls: number };
+  forbiddenClaims: string[];
+  ai: { model: string; promptVersion: string; maxReplyChars: number };
+}
+
 export interface AiDecisionContext {
-  lead: {
-    id: string;
-    fullName: string | null;
-    phone: string | null;
-    source: string;
-    status: string;
-    heat: string;
-    score: number;
-    ownershipMode: string;
-    paymentStatus: string | null;
-    doNotContact: boolean;
-    removedByRequest: boolean;
-    conversationSummary: string | null;
-  };
-  recentMessages: Array<{
-    senderType: string;
-    contentText: string | null;
-    createdAt: string;
-  }>;
-  runtimeConfig: {
-    activeHours: {
-      start: string;
-      end: string;
-      timezone: string;
-    };
-    followUpDelays: {
-      firstResponseMinutes: number;
-      nurtureHours: number;
-      paymentPendingHours: number;
-    };
-  };
+  lead: AiLeadContext;
+  recentMessages: AiRecentMessage[];
+  runtimeConfig: AiRuntimeConfig;
+  freeAdviceCount: number;
 }
 
 export interface AiDecisionOutput {
@@ -44,5 +55,7 @@ export interface AiDecisionOutput {
   nextActionType: string | null;
   nextActionDueAt: string | null;
   notesForMia: string | null;
-  sendMode: 'freeform' | 'template' | 'manual_only' | 'no_send';
+  sendMode: SendMode;
+  policyFlags: string[];
+  playbookName: string;
 }

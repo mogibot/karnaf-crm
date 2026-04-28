@@ -1,148 +1,232 @@
-import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
-import { sendWhatsAppText } from '../_shared/whatsapp-provider.ts';
+import { jsonResponse, preflight } from '../_shared/cors.ts';
+import { sendWhatsAppText, sendWhatsAppTemplate } from '../_shared/whatsapp-provider.ts';
 import { getServiceSupabase } from '../_shared/supabase.ts';
 import { ensurePendingQueueItem } from '../_shared/queue-service.ts';
-import { logLeadEvent, updateLeadTimestamps } from '../_shared/lead-service.ts';
+import { logLeadEvent, transitionLeadStatus, updateLeadFields } from '../_shared/lead-service.ts';
 import { getRuntimeConfig } from '../_shared/config-service.ts';
-import { createLeadTask } from '../_shared/task-service.ts';
 import { runAiDecision } from '../_shared/ai-decision-service.ts';
+import { releaseConversationLock, tryConversationLock } from '../_shared/conversation-lock.ts';
+import { resolveSendMode } from '../_shared/conversation-window.ts';
+import { maybeRefreshSummary } from '../_shared/transcript-summary.ts';
+import { verifyBearer } from '../_shared/webhook-signature.ts';
+import { env } from '../_shared/env.ts';
+import { correlationFromRequest, log } from '../_shared/logger.ts';
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+  const pre = preflight(req);
+  if (pre) return pre;
+  if (req.method !== 'POST') return jsonResponse(req, { error: 'Method not allowed' }, 405);
+
+  // Internal endpoint: only accept calls bearing the service-role key.
+  if (!verifyBearer(req, env.serviceRoleKey())) {
+    return jsonResponse(req, { error: 'Unauthorized' }, 401);
   }
 
-  if (req.method !== 'POST') {
-    return jsonResponse({ error: 'Method not allowed' }, 405);
-  }
-
-  const { leadId, conversationId } = await req.json();
-  if (!leadId || !conversationId) {
-    return jsonResponse({ error: 'Missing leadId or conversationId' }, 400);
-  }
+  const correlationId = correlationFromRequest(req);
+  const { leadId, conversationId } = await req.json().catch(() => ({}));
+  if (!leadId || !conversationId) return jsonResponse(req, { error: 'Missing leadId or conversationId' }, 400);
 
   const supabase = getServiceSupabase();
-
-  const config = await getRuntimeConfig(supabase);
-
-  const { data: lead, error: leadError } = await supabase
-    .from('leads')
-    .select('*')
-    .eq('id', leadId)
-    .single();
-
-  if (leadError || !lead) {
-    return jsonResponse({ error: leadError?.message || 'Lead not found' }, 404);
+  const got = await tryConversationLock(supabase, conversationId);
+  if (!got) {
+    log.info('orchestrate_lock_busy', { fn: 'orchestrate', correlationId, conversationId });
+    return jsonResponse(req, { ok: true, skipped: 'locked' });
   }
 
-  const { data: recentMessages, error: messagesError } = await supabase
-    .from('messages')
-    .select('sender_type, content_text, created_at')
-    .eq('conversation_id', conversationId)
-    .order('created_at', { ascending: false })
-    .limit(8);
+  try {
+    const config = await getRuntimeConfig(supabase);
 
-  if (messagesError) {
-    return jsonResponse({ error: messagesError.message }, 500);
-  }
+    const { data: lead, error: leadErr } = await supabase.from('leads').select('*').eq('id', leadId).single();
+    if (leadErr || !lead) return jsonResponse(req, { error: leadErr?.message ?? 'Lead not found' }, 404);
 
-  const normalizedMessages = (recentMessages || []).map((m) => ({
-    senderType: String(m.sender_type || ''),
-    contentText: (m.content_text as string | null) || null,
-    createdAt: String(m.created_at || ''),
-  }));
+    if (lead.do_not_contact || lead.removed_by_request) {
+      log.info('orchestrate_suppressed', { fn: 'orchestrate', correlationId, leadId, reason: 'dnc_or_removed' });
+      return jsonResponse(req, { ok: true, skipped: 'suppressed' });
+    }
 
-  const decision = await runAiDecision(supabase, {
-    lead: {
-      id: String(lead.id),
-      fullName: lead.full_name,
-      phone: lead.phone,
-      source: lead.source,
-      status: lead.lead_status,
-      heat: lead.lead_heat,
-      score: Number(lead.lead_score || 0),
-      ownershipMode: lead.ownership_mode,
-      paymentStatus: lead.payment_status,
-      doNotContact: !!lead.do_not_contact,
-      removedByRequest: !!lead.removed_by_request,
-      conversationSummary: lead.conversation_summary,
-    },
-    recentMessages: normalizedMessages,
-    runtimeConfig: config,
-  });
+    // Channel-gating: the AI orchestrator currently only owns the WhatsApp
+    // channel. Other channels (email, IG DM scraped manually, etc.) get
+    // queued for Mia rather than dispatched.
+    const { data: conversation, error: convErr } = await supabase
+      .from('conversations').select('channel').eq('id', conversationId).single();
+    if (convErr) return jsonResponse(req, { error: convErr.message }, 500);
+    if (conversation?.channel && conversation.channel !== 'whatsapp') {
+      await ensurePendingQueueItem(supabase, {
+        leadId, queueType: 'human_handoff', priorityLevel: 2,
+        reason: `שיחה בערוץ ${conversation.channel} דורשת מענה ידני`,
+        payloadJson: { channel: conversation.channel, correlationId },
+      });
+      log.info('orchestrate_channel_skipped', {
+        fn: 'orchestrate', correlationId, leadId, channel: conversation.channel,
+      });
+      return jsonResponse(req, { ok: true, skipped: 'non_whatsapp_channel', channel: conversation.channel });
+    }
 
-  const canSend = decision.sendMode === 'freeform' && !!decision.replyText && !lead.do_not_contact && !lead.removed_by_request;
-  const sendResult = canSend
-    ? await sendWhatsAppText(lead.phone, decision.replyText as string)
-    : { ok: false, error: 'Suppressed, invalid, or no-send decision' };
+    if (!lead.phone) {
+      await ensurePendingQueueItem(supabase, {
+        leadId, queueType: 'manual_review_required', priorityLevel: 2,
+        reason: 'ליד ללא מספר טלפון, נדרשת בדיקה ידנית',
+        payloadJson: { correlationId },
+      });
+      log.info('orchestrate_no_phone', { fn: 'orchestrate', correlationId, leadId });
+      return jsonResponse(req, { ok: true, skipped: 'no_phone' });
+    }
 
-  if (canSend && sendResult.ok) {
-    await supabase.from('messages').insert({
-      conversation_id: conversationId,
-      lead_id: leadId,
-      provider_message_id: sendResult.providerMessageId || null,
-      sender_type: 'ai',
-      direction: 'outbound',
-      message_type: 'text',
-      content_text: decision.replyText,
-      provider_status: 'sent',
-    });
+    const { data: recentMessages, error: msgErr } = await supabase
+      .from('messages')
+      .select('sender_type, content_text, created_at, direction')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: false })
+      .limit(8);
+    if (msgErr) return jsonResponse(req, { error: msgErr.message }, 500);
 
-    await logLeadEvent(supabase, leadId, 'ai_reply_sent', 'ai', {
-      reply_text: decision.replyText,
-      lead_status_update: decision.leadStatusUpdate,
-      lead_heat_update: decision.leadHeatUpdate,
-      score_delta: decision.scoreDelta,
-    }, conversationId);
+    const ordered = (recentMessages ?? []).slice().reverse();
+    const freeAdviceCount = ordered.filter((m) => m.sender_type === 'lead' && (m.content_text ?? '').length > 80).length;
 
-    const nextScore = Math.max(0, Math.min(100, Number(lead.lead_score || 0) + decision.scoreDelta));
-    const safeStatus = decision.leadStatusUpdate || lead.lead_status;
-    const safeHeat = decision.leadHeatUpdate || lead.lead_heat;
+    const decision = await runAiDecision(supabase, {
+      lead: {
+        id: String(lead.id),
+        fullName: lead.full_name,
+        phone: lead.phone,
+        source: lead.source,
+        status: lead.lead_status,
+        heat: lead.lead_heat,
+        score: Number(lead.lead_score ?? 0),
+        ownershipMode: lead.ownership_mode,
+        paymentStatus: lead.payment_status,
+        doNotContact: !!lead.do_not_contact,
+        removedByRequest: !!lead.removed_by_request,
+        conversationSummary: lead.conversation_summary,
+        lastInboundAt: lead.last_inbound_at,
+        lastOutboundAt: lead.last_outbound_at,
+      },
+      recentMessages: ordered.map((m) => ({
+        senderType: String(m.sender_type ?? ''),
+        contentText: (m.content_text as string | null) ?? null,
+        createdAt: String(m.created_at ?? ''),
+      })),
+      runtimeConfig: config,
+      freeAdviceCount,
+    }, correlationId);
 
-    await updateLeadTimestamps(supabase, leadId, {
-      lead_status: safeStatus,
-      lead_heat: safeHeat,
-      lead_score: nextScore,
-      last_message_at: new Date().toISOString(),
-      last_outbound_at: new Date().toISOString(),
-      last_ai_touch_at: new Date().toISOString(),
-    });
+    const out = decision.output;
+    const desiredMode = out.sendMode;
+    const effectiveMode = resolveSendMode(desiredMode, lead.last_inbound_at, config.whatsappSession.freeformWindowHours);
 
-    if (decision.createQueueType) {
+    let sendResult: { ok: boolean; providerMessageId?: string; error?: string } = { ok: false };
+    let attemptedSend = false;
+
+    if (out.replyText && (effectiveMode === 'freeform' || effectiveMode === 'template')) {
+      attemptedSend = true;
+      try {
+        if (effectiveMode === 'freeform') {
+          sendResult = await sendWhatsAppText(lead.phone as string, out.replyText);
+        } else {
+          sendResult = await sendWhatsAppTemplate(lead.phone as string, config.whatsappSession.fallbackTemplateName, [
+            { name: 'reply', value: out.replyText },
+          ]);
+        }
+      } catch (err) {
+        sendResult = { ok: false, error: String(err) };
+      }
+    }
+
+    if (sendResult.ok && out.replyText) {
+      // Persist the AI message; trigger updates lead timestamps.
+      await supabase.from('messages').insert({
+        conversation_id: conversationId,
+        lead_id: leadId,
+        provider_message_id: sendResult.providerMessageId ?? null,
+        sender_type: 'ai',
+        direction: 'outbound',
+        message_type: effectiveMode === 'template' ? 'template' : 'text',
+        content_text: out.replyText,
+        provider_status: 'sent',
+      });
+
+      const nextScore = Math.max(0, Math.min(100, Number(lead.lead_score ?? 0) + out.scoreDelta));
+      const updates: Record<string, unknown> = { lead_score: nextScore };
+      if (out.leadHeatUpdate) updates.lead_heat = out.leadHeatUpdate;
+      if (out.nextActionType) updates.next_action_type = out.nextActionType;
+      if (out.nextActionDueAt) updates.next_action_due_at = out.nextActionDueAt;
+      else updates.next_action_due_at = new Date(Date.now() + config.followUpDelays.firstResponseMinutes * 60_000).toISOString();
+      await updateLeadFields(supabase, leadId, updates);
+
+      if (out.leadStatusUpdate) {
+        await transitionLeadStatus(supabase, leadId, out.leadStatusUpdate, 'ai', `playbook:${out.playbookName}`);
+      }
+
+      await logLeadEvent(supabase, leadId, 'ai_reply_sent', 'ai', {
+        playbook: out.playbookName,
+        score_delta: out.scoreDelta,
+        heat_update: out.leadHeatUpdate,
+        send_mode: effectiveMode,
+        correlation_id: correlationId,
+      }, conversationId);
+    } else if (attemptedSend && !sendResult.ok) {
+      // Send failed → record an integration log + failed_automation queue.
+      await supabase.from('integration_logs').insert({
+        source: 'whatsapp_outbound',
+        status: 'error',
+        lead_id: leadId,
+        request_data: { reply_text: out.replyText, mode: effectiveMode },
+        response_data: { error: sendResult.error ?? null },
+        error_message: sendResult.error ?? null,
+      });
       await ensurePendingQueueItem(supabase, {
         leadId,
-        queueType: decision.createQueueType,
-        priorityLevel: decision.escalateToPhoneSales ? 1 : 2,
-        reason: decision.notesForMia || 'Escalation required',
-        queueSummary: decision.replyText,
+        queueType: 'failed_automation',
+        priorityLevel: 1,
+        reason: 'WhatsApp outbound failed after retries',
+        queueSummary: sendResult.error ?? 'unknown_error',
+        payloadJson: { effectiveMode, correlationId },
+      });
+    }
+
+    if (out.createQueueType) {
+      await ensurePendingQueueItem(supabase, {
+        leadId,
+        queueType: out.createQueueType,
+        priorityLevel: out.escalateToPhoneSales ? 1 : 2,
+        reason: out.notesForMia ?? 'AI escalation',
+        queueSummary: out.replyText ?? null,
         payloadJson: {
-          escalate_to_mia: decision.escalateToMia,
-          escalate_to_phone_sales: decision.escalateToPhoneSales,
+          escalate_to_mia: out.escalateToMia,
+          escalate_to_phone_sales: out.escalateToPhoneSales,
+          playbook: out.playbookName,
         },
       });
     }
 
-    await createLeadTask(supabase, {
-      leadId,
-      conversationId,
-      taskType: 'follow_up',
-      ownerType: decision.escalateToMia ? 'mia' : 'ai',
-      title: decision.escalateToMia ? 'בדיקת handoff אנושי' : 'מעקב המשך ליד',
-      description: decision.notesForMia || 'Follow-up generated by orchestration runtime',
-      priorityLevel: decision.escalateToPhoneSales ? 1 : decision.escalateToMia ? 2 : 3,
-      dueAt: new Date(Date.now() + config.followUpDelays.firstResponseMinutes * 60 * 1000).toISOString(),
-      payloadJson: {
-        generated_by: 'orchestrate-message',
-        queue_type: decision.createQueueType,
-      },
-    });
-  }
+    if (out.escalateToMia || out.escalateToPhoneSales) {
+      await updateLeadFields(supabase, leadId, {
+        ownership_mode: out.escalateToPhoneSales ? 'phone_sales_pending' : 'mia_active',
+        requested_phone_call: out.escalateToPhoneSales ? true : !!lead.requested_phone_call,
+      });
+      const handoffStatus = 'human_handoff';
+      await transitionLeadStatus(supabase, leadId, handoffStatus, 'ai', 'orchestrator_handoff');
+    }
 
-  return jsonResponse({
-    ok: true,
-    decision,
-    sendResult,
-    config,
-    note: 'AI orchestration scaffold is now wired, with placeholder fallback when model access is unavailable or fails.',
-  });
+    // Refresh transcript summary in the background (non-blocking).
+    maybeRefreshSummary(supabase, leadId, conversationId).catch((err) =>
+      log.error('summary_refresh_failed', { fn: 'orchestrate', correlationId, err: String(err) }),
+    );
+
+    log.info('orchestrate_completed', {
+      fn: 'orchestrate', correlationId, leadId, conversationId,
+      sentOk: sendResult.ok, mode: effectiveMode, status: decision.executionStatus,
+      playbook: out.playbookName,
+    });
+
+    return jsonResponse(req, {
+      ok: true,
+      decision: out,
+      executionStatus: decision.executionStatus,
+      sendResult,
+      mode: effectiveMode,
+      correlationId,
+    });
+  } finally {
+    await releaseConversationLock(supabase, conversationId);
+  }
 });

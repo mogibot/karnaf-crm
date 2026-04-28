@@ -1,106 +1,140 @@
-import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
+import { jsonResponse, preflight } from '../_shared/cors.ts';
 import { normalizeIsraeliPhone } from '../_shared/phone.ts';
 import { normalizeProviderInbound } from '../_shared/whatsapp-provider.ts';
 import { getServiceSupabase } from '../_shared/supabase.ts';
-import { ensureConversation, ensureLeadForPhone, logLeadEvent, updateLeadTimestamps } from '../_shared/lead-service.ts';
+import { ensureConversation, logLeadEvent, upsertLeadByPhone } from '../_shared/lead-service.ts';
 import { messageAlreadyLogged } from '../_shared/idempotency.ts';
-
-const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-const VERIFY_TOKEN = Deno.env.get('WHATSAPP_VERIFY_TOKEN') || '';
+import { verifyMetaSignature } from '../_shared/webhook-signature.ts';
+import { env, safeEqual } from '../_shared/env.ts';
+import { correlationFromRequest, log } from '../_shared/logger.ts';
+import { checkRateLimit, clientIdentifier } from '../_shared/rate-limit.ts';
+import { archiveWhatsAppMedia } from '../_shared/media-fetch.ts';
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
-  }
+  const pre = preflight(req);
+  if (pre) return pre;
+
+  const correlationId = correlationFromRequest(req);
 
   if (req.method === 'GET') {
     const url = new URL(req.url);
     const mode = url.searchParams.get('hub.mode');
     const token = url.searchParams.get('hub.verify_token');
     const challenge = url.searchParams.get('hub.challenge');
-
-    if (mode === 'subscribe' && token === VERIFY_TOKEN) {
-      return new Response(challenge ?? '', { status: 200, headers: corsHeaders });
+    if (mode === 'subscribe' && token && safeEqual(token, env.whatsappVerifyToken())) {
+      return new Response(challenge ?? '', { status: 200 });
     }
-
-    return jsonResponse({ error: 'Forbidden' }, 403);
+    return jsonResponse(req, { error: 'Forbidden' }, 403);
   }
 
   if (req.method !== 'POST') {
-    return jsonResponse({ error: 'Method not allowed' }, 405);
+    return jsonResponse(req, { error: 'Method not allowed' }, 405);
   }
 
-  const body = await req.json();
-  const normalized = normalizeProviderInbound(body);
+  const rawBody = await req.text();
 
+  // Meta sends X-Hub-Signature-256. WATI uses bearer-style auth on its
+  // webhook config; for WATI, requiring a verify token in the URL has the
+  // same effect, so we tolerate the missing header but require app secret
+  // for Meta-style payloads.
+  if (env.whatsappAppSecret() && req.headers.get('x-hub-signature-256')) {
+    const valid = await verifyMetaSignature(req, rawBody, env.whatsappAppSecret());
+    if (!valid) {
+      log.warn('whatsapp_signature_invalid', { fn: 'whatsapp-webhook', correlationId });
+      return jsonResponse(req, { error: 'Invalid signature' }, 401);
+    }
+  }
+
+  let body: Record<string, unknown>;
+  try { body = JSON.parse(rawBody); } catch {
+    return jsonResponse(req, { error: 'Invalid JSON' }, 400);
+  }
+
+  const normalized = normalizeProviderInbound(body);
   if (!normalized) {
-    return jsonResponse({ ok: true, skipped: true, reason: 'Unsupported payload' });
+    return jsonResponse(req, { ok: true, skipped: true, reason: 'unsupported_payload' });
+  }
+
+  const supabase = getServiceSupabase();
+
+  const allowed = await checkRateLimit(supabase, {
+    key: `whatsapp:${clientIdentifier(req)}`,
+    windowSeconds: 60,
+    maxRequests: 120,
+  });
+  if (!allowed) {
+    log.warn('rate_limited', { fn: 'whatsapp-webhook', correlationId, ip: clientIdentifier(req) });
+    return jsonResponse(req, { error: 'Rate limit exceeded' }, 429);
+  }
+
+  if (await messageAlreadyLogged(supabase, normalized.providerMessageId)) {
+    return jsonResponse(req, { ok: true, skipped: true, reason: 'duplicate_provider_message_id' });
   }
 
   const phone = normalizeIsraeliPhone(normalized.phone) || normalized.phone;
-  const supabase = getServiceSupabase();
-
-  const alreadyLogged = await messageAlreadyLogged(supabase, normalized.providerMessageId);
-  if (alreadyLogged) {
-    return jsonResponse({ ok: true, skipped: true, reason: 'duplicate_provider_message_id' });
-  }
-
-  const lead = await ensureLeadForPhone(supabase, {
+  const lead = await upsertLeadByPhone(supabase, {
     phone,
     senderName: normalized.senderName,
     source: 'whatsapp',
     intakeChannel: 'whatsapp',
   });
-  const leadId = lead.id as string;
+  const conversation = await ensureConversation(supabase, lead.id, 'whatsapp', normalized.provider);
 
-  const conversation = await ensureConversation(supabase, leadId, 'whatsapp', normalized.provider);
-  const conversationId = conversation.id as string;
-
-  await supabase.from('messages').insert({
-    conversation_id: conversationId,
-    lead_id: leadId,
+  // Insert the inbound message; relies on trigger sync_lead_message_timestamps
+  // to update lead.last_message_at + last_inbound_at atomically.
+  const { data: insertedMsg, error: msgErr } = await supabase.from('messages').insert({
+    conversation_id: conversation.id,
+    lead_id: lead.id,
     provider_message_id: normalized.providerMessageId,
     sender_type: 'lead',
     sender_name: normalized.senderName,
     direction: 'inbound',
-    message_type: normalized.messageType,
+    message_type: normalized.messageType === 'unknown' ? 'text' : normalized.messageType,
     content_text: normalized.text,
-    media_type: normalized.mediaType || null,
+    media_type: normalized.mediaType ?? null,
     created_at: normalized.receivedAt,
     raw_payload: normalized.rawPayload,
-  });
+  }).select('id').single();
+  // Conflict on the unique provider_message_id index = duplicate that beat
+  // our pre-check. Treat as no-op success.
+  if (msgErr && !String(msgErr.message || '').includes('duplicate key value')) {
+    log.error('inbound_insert_failed', { fn: 'whatsapp-webhook', correlationId, err: String(msgErr) });
+    return jsonResponse(req, { error: 'Failed to log inbound message' }, 500);
+  }
 
-  await logLeadEvent(supabase, leadId, 'inbound_message_received', 'provider', {
+  // Archive WhatsApp media (image/audio/video/document) to private storage
+  // out-of-band. Failures are logged but never break the webhook contract.
+  if (insertedMsg?.id && normalized.messageType === 'media') {
+    archiveWhatsAppMedia(supabase, {
+      messageId: insertedMsg.id as string,
+      providerMessageId: normalized.providerMessageId,
+      rawPayload: normalized.rawPayload,
+      conversationId: conversation.id,
+    }, correlationId).catch((err) =>
+      log.error('media_archive_failed', { fn: 'whatsapp-webhook', correlationId, err: String(err) }),
+    );
+  }
+
+  await logLeadEvent(supabase, lead.id, 'inbound_message_received', 'provider', {
     provider: normalized.provider,
     provider_message_id: normalized.providerMessageId,
-  }, conversationId);
+    correlation_id: correlationId,
+  }, conversation.id);
 
-  await updateLeadTimestamps(supabase, leadId, {
-    last_message_at: normalized.receivedAt,
-    last_inbound_at: normalized.receivedAt,
-  });
-
-  const orchestrateRes = await fetch(`${SUPABASE_URL}/functions/v1/orchestrate-message`, {
+  // Fire-and-forget the orchestrator. We don't await its work to keep the
+  // webhook latency low; the Supabase edge runtime guarantees the request
+  // completes before the function shuts down.
+  const orchestrateUrl = `${env.supabaseUrl()}/functions/v1/orchestrate-message`;
+  fetch(orchestrateUrl, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      Authorization: `Bearer ${env.serviceRoleKey()}`,
       'Content-Type': 'application/json',
+      'x-correlation-id': correlationId,
     },
-    body: JSON.stringify({
-      leadId,
-      conversationId,
-      provider: normalized.provider,
-      providerMessageId: normalized.providerMessageId,
-    }),
-  });
+    body: JSON.stringify({ leadId: lead.id, conversationId: conversation.id }),
+  }).catch((err) => log.error('orchestrate_dispatch_failed', { fn: 'whatsapp-webhook', correlationId, err: String(err) }));
 
-  const orchestrateJson = await orchestrateRes.json().catch(() => null);
-
-  return jsonResponse({
-    ok: true,
-    leadId,
-    conversationId,
-    orchestrator: orchestrateJson,
-  });
+  log.info('inbound_accepted', { fn: 'whatsapp-webhook', correlationId, leadId: lead.id, conversationId: conversation.id });
+  return jsonResponse(req, { ok: true, leadId: lead.id, conversationId: conversation.id, correlationId });
 });

@@ -1,12 +1,16 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { env } from './env.ts';
 
-export function getServiceSupabase() {
-  const url = Deno.env.get('SUPABASE_URL');
-  const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+export function getServiceSupabase(): SupabaseClient {
+  return createClient(env.supabaseUrl(), env.serviceRoleKey(), {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: { headers: { 'x-client-info': 'karnaf-crm-edge' } },
+  });
+}
 
-  if (!url || !key) {
-    throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');
-  }
-
-  return createClient(url, key);
+export function getRequestSupabase(jwt: string): SupabaseClient {
+  return createClient(env.supabaseUrl(), env.anonKey(), {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: { headers: { Authorization: `Bearer ${jwt}` } },
+  });
 }

@@ -1,7 +1,7 @@
 export function normalizeIsraeliPhone(raw: string | null | undefined): string | null {
   if (!raw) return null;
 
-  let phone = raw.replace(/[\s\-\(\)\.]/g, '');
+  let phone = raw.replace(/[\s\-().]/g, '');
 
   if (phone.startsWith('+972')) {
     phone = '0' + phone.slice(4);

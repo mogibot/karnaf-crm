@@ -1,108 +1,176 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import type { AiDecisionContext, AiDecisionOutput } from './ai-contract.ts';
 import { buildAiSystemPrompt, buildAiUserPrompt } from './ai-prompt.ts';
-import { decidePlaceholderReply } from './placeholder-brain.ts';
+import { selectPlaybook } from './playbooks.ts';
 import { validateAiDecision } from './ai-validation.ts';
+import { isOpen, recordFailure, recordSuccess } from './circuit-breaker.ts';
+import { pickPromptVariant, type PromptVariant } from './prompt-variant.ts';
+import { env } from './env.ts';
+import { log } from './logger.ts';
 
-const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY') || '';
-const OPENAI_MODEL = Deno.env.get('OPENAI_MODEL') || 'gpt-5-mini';
+const BREAKER_KEY = 'openai';
+
+export interface DecisionResult {
+  output: AiDecisionOutput;
+  executionStatus: string;
+  rawOutput: unknown;
+  promptVersion: string;
+}
 
 export async function runAiDecision(
   supabase: SupabaseClient,
   context: AiDecisionContext,
-): Promise<AiDecisionOutput> {
-  const placeholder = decidePlaceholderReply({
-    inboundText: context.recentMessages.filter((m) => m.senderType === 'lead').at(-1)?.contentText || '',
-    fullName: context.lead.fullName,
+  correlationId: string,
+): Promise<DecisionResult> {
+  const lastInbound = context.recentMessages.filter((m) => m.senderType === 'lead').slice(-1)[0]?.contentText ?? '';
+  const hoursSinceInbound = context.lead.lastInboundAt
+    ? (Date.now() - Date.parse(context.lead.lastInboundAt)) / (1000 * 60 * 60)
+    : null;
+
+  const playbook = selectPlaybook({
+    inboundText: lastInbound,
+    leadStatus: context.lead.status,
     source: context.lead.source,
-    currentStatus: context.lead.status,
-    currentHeat: context.lead.heat,
+    paymentStatus: context.lead.paymentStatus,
+    hoursSinceLastInbound: hoursSinceInbound,
+    freeAdviceCount: context.freeAdviceCount,
   });
 
-  const placeholderOutput: AiDecisionOutput = {
-    replyText: placeholder.replyText,
-    intentClassification: 'placeholder_runtime',
-    leadStatusUpdate: placeholder.leadStatusUpdate,
-    leadHeatUpdate: placeholder.leadHeatUpdate,
-    scoreDelta: placeholder.scoreDelta,
-    escalateToMia: placeholder.escalateToMia,
-    escalateToPhoneSales: placeholder.escalateToPhoneSales,
-    createQueueType: placeholder.createQueueType,
-    nextActionType: placeholder.escalateToMia ? 'human_follow_up' : 'follow_up',
-    nextActionDueAt: null,
-    notesForMia: placeholder.notesForMia,
-    sendMode: placeholder.replyText ? 'freeform' : 'no_send',
+  // A/B variant: weighted random pick from active rows for this playbook.
+  // Falls back to the static prompt_version configured in crm_config.
+  let variant: PromptVariant | null = null;
+  try {
+    variant = await pickPromptVariant(supabase, playbook.name);
+  } catch (err) {
+    log.warn('variant_lookup_failed', { fn: 'runAiDecision', correlationId, err: String(err) });
+  }
+  const promptVersion = variant?.version ?? context.runtimeConfig.ai.promptVersion;
+  const overrides = variant?.prompt_overrides ?? {};
+
+  const validateInput = {
+    currentStatus: context.lead.status,
+    forbiddenClaims: context.runtimeConfig.forbiddenClaims,
+    playbook,
+    maxReplyChars: context.runtimeConfig.ai.maxReplyChars,
+    isDoNotContact: context.lead.doNotContact,
+    isRemovedByRequest: context.lead.removedByRequest,
+  } as const;
+
+  const blockWith = (status: string, raw: unknown) => {
+    const validated = validateAiDecision({ output: emptyOutput(playbook.name), ...validateInput });
+    return logDecision(supabase, context, validated.output, status, raw, correlationId, promptVersion)
+      .then(() => ({ output: validated.output, executionStatus: status, rawOutput: raw, promptVersion }));
   };
 
-  if (!OPENAI_API_KEY) {
-    const validated = validateAiDecision(placeholderOutput);
-    await logAiDecision(supabase, context, validated, 'placeholder_no_openai_key');
-    return validated;
+  if (!env.openaiApiKey()) {
+    return blockWith('model_disabled', null);
+  }
+
+  const breakerCfg = { threshold: 3, cooldownMs: 5 * 60 * 1000 };
+  if (isOpen(BREAKER_KEY, breakerCfg)) {
+    log.warn('ai_circuit_open', { fn: 'runAiDecision', correlationId, leadId: context.lead.id });
+    return blockWith('circuit_open', null);
   }
 
   try {
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        Authorization: `Bearer ${env.openaiApiKey()}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: OPENAI_MODEL,
+        model: env.openaiModel(),
         response_format: { type: 'json_object' },
+        temperature: 0.4,
         messages: [
-          { role: 'system', content: buildAiSystemPrompt() },
+          { role: 'system', content: buildAiSystemPrompt(playbook, context, overrides) },
           { role: 'user', content: buildAiUserPrompt(context) },
         ],
       }),
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      const validated = validateAiDecision(placeholderOutput);
-      await logAiDecision(supabase, context, validated, `openai_error:${response.status}:${errorText.slice(0, 200)}`);
-      return validated;
+      const errText = await response.text();
+      recordFailure(BREAKER_KEY, breakerCfg);
+      return blockWith(`openai_error:${response.status}`, errText.slice(0, 400));
     }
 
     const json = await response.json();
-    const content = json.choices?.[0]?.message?.content;
+    const content = json.choices?.[0]?.message?.content as string | undefined;
     if (!content) {
-      const validated = validateAiDecision(placeholderOutput);
-      await logAiDecision(supabase, context, validated, 'openai_empty_content');
-      return validated;
+      recordFailure(BREAKER_KEY, breakerCfg);
+      return blockWith('openai_empty_content', json);
     }
 
-    const parsed = JSON.parse(content) as Partial<AiDecisionOutput>;
+    let parsed: Partial<AiDecisionOutput>;
+    try {
+      parsed = JSON.parse(content) as Partial<AiDecisionOutput>;
+    } catch {
+      recordFailure(BREAKER_KEY, breakerCfg);
+      return blockWith('openai_exception', content.slice(0, 400));
+    }
+
     const merged: AiDecisionOutput = {
-      ...placeholderOutput,
+      ...emptyOutput(playbook.name),
       ...parsed,
-      sendMode: parsed.sendMode || placeholderOutput.sendMode,
+      sendMode: parsed.sendMode ?? 'freeform',
+      policyFlags: Array.isArray(parsed.policyFlags) ? parsed.policyFlags : [],
+      playbookName: playbook.name,
     };
 
-    const validated = validateAiDecision(merged);
-    await logAiDecision(supabase, context, validated, 'openai_success');
-    return validated;
-  } catch (error) {
-    const validated = validateAiDecision(placeholderOutput);
-    await logAiDecision(supabase, context, validated, `openai_exception:${String(error)}`);
-    return validated;
+    const validated = validateAiDecision({ output: merged, ...validateInput });
+    recordSuccess(BREAKER_KEY);
+    const status = validated.flags.length ? 'validation_blocked' : 'openai_success';
+    await logDecision(supabase, context, validated.output, status, parsed, correlationId, promptVersion);
+    return { output: validated.output, executionStatus: status, rawOutput: parsed, promptVersion };
+  } catch (err) {
+    recordFailure(BREAKER_KEY, breakerCfg);
+    return blockWith('openai_exception', String(err));
   }
 }
 
-async function logAiDecision(
+function emptyOutput(playbookName: string): AiDecisionOutput {
+  return {
+    replyText: null,
+    intentClassification: 'unclassified',
+    leadStatusUpdate: null,
+    leadHeatUpdate: null,
+    scoreDelta: 0,
+    escalateToMia: false,
+    escalateToPhoneSales: false,
+    createQueueType: null,
+    nextActionType: null,
+    nextActionDueAt: null,
+    notesForMia: null,
+    sendMode: 'no_send',
+    policyFlags: [],
+    playbookName,
+  };
+}
+
+async function logDecision(
   supabase: SupabaseClient,
   context: AiDecisionContext,
   output: AiDecisionOutput,
   executionStatus: string,
+  rawOutput: unknown,
+  correlationId: string,
+  promptVersion: string,
 ) {
-  await supabase.from('ai_decisions').insert({
-    lead_id: context.lead.id,
-    model_name: OPENAI_API_KEY ? OPENAI_MODEL : 'placeholder',
-    prompt_version: 'v0-scaffold',
-    playbook_name: 'general_runtime',
-    input_context_json: context,
-    raw_output_json: output,
-    validated_output_json: output,
-    execution_status: executionStatus,
-  });
+  try {
+    await supabase.from('ai_decisions').insert({
+      lead_id: context.lead.id,
+      model_name: env.openaiApiKey() ? env.openaiModel() : 'disabled',
+      prompt_version: promptVersion,
+      playbook_name: output.playbookName,
+      input_context_json: { ...context, correlationId },
+      raw_output_json: rawOutput ?? {},
+      validated_output_json: output,
+      execution_status: executionStatus,
+      error_message: executionStatus.startsWith('openai_') && executionStatus !== 'openai_success' ? executionStatus : null,
+    });
+  } catch (err) {
+    log.error('ai_decisions_insert_failed', { fn: 'logDecision', correlationId, err: String(err) });
+  }
 }

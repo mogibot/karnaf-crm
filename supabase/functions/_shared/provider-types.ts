@@ -15,3 +15,8 @@ export interface OutboundSendResult {
   providerMessageId?: string;
   error?: string;
 }
+
+export interface TemplateParam {
+  name: string;
+  value: string;
+}

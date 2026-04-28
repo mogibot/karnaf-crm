@@ -1,75 +1,85 @@
+import { jsonResponse, preflight } from '../_shared/cors.ts';
 import { getServiceSupabase } from '../_shared/supabase.ts';
-import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
+import { verifyMetaSignature } from '../_shared/webhook-signature.ts';
+import { env } from '../_shared/env.ts';
+import { correlationFromRequest, log } from '../_shared/logger.ts';
+import { checkRateLimit, clientIdentifier } from '../_shared/rate-limit.ts';
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+  const pre = preflight(req);
+  if (pre) return pre;
+  if (req.method !== 'POST') return jsonResponse(req, { error: 'Method not allowed' }, 405);
+
+  const correlationId = correlationFromRequest(req);
+  const rawBody = await req.text();
+
+  if (env.whatsappAppSecret() && req.headers.get('x-hub-signature-256')) {
+    const valid = await verifyMetaSignature(req, rawBody, env.whatsappAppSecret());
+    if (!valid) {
+      log.warn('status_signature_invalid', { fn: 'provider-status-webhook', correlationId });
+      return jsonResponse(req, { error: 'Invalid signature' }, 401);
+    }
   }
 
-  if (req.method !== 'POST') {
-    return jsonResponse({ error: 'Method not allowed' }, 405);
+  let payload: Record<string, unknown>;
+  try { payload = JSON.parse(rawBody); } catch {
+    return jsonResponse(req, { error: 'Invalid JSON' }, 400);
   }
 
-  const payload = await req.json();
   const supabase = getServiceSupabase();
 
-  const providerMessageId = payload.message_id || payload.id || payload.statuses?.[0]?.id || null;
-  const status = payload.status || payload.statuses?.[0]?.status || 'unknown';
-  const errorMessage = payload.error?.message || payload.errors?.[0]?.message || null;
-  const timestamp = new Date().toISOString();
-
-  if (!providerMessageId) {
-    await supabase.from('integration_logs').insert({
-      source: 'provider_status_webhook',
-      status: 'ignored',
-      request_data: payload,
-      response_data: { reason: 'missing_provider_message_id' },
-    });
-
-    return jsonResponse({ ok: true, ignored: true });
+  const allowed = await checkRateLimit(supabase, {
+    key: `status:${clientIdentifier(req)}`,
+    windowSeconds: 60,
+    maxRequests: 240,
+  });
+  if (!allowed) {
+    return jsonResponse(req, { error: 'Rate limit exceeded' }, 429);
   }
 
-  const { data: message } = await supabase
-    .from('messages')
-    .select('id, lead_id, conversation_id')
-    .eq('provider_message_id', providerMessageId)
-    .maybeSingle();
+  // Meta delivers an array of statuses inside entry[0].changes[0].value.statuses;
+  // WATI sends flat fields. Normalise both shapes.
+  const flatStatuses = Array.isArray(payload.statuses) ? (payload.statuses as Array<Record<string, unknown>>) : null;
+  const metaStatuses = (((payload.entry as Array<Record<string, unknown>> | undefined)?.[0]?.changes as Array<Record<string, unknown>> | undefined)?.[0]?.value as Record<string, unknown> | undefined)?.statuses as Array<Record<string, unknown>> | undefined;
+  const statuses = metaStatuses ?? flatStatuses ?? [{
+    id: payload.message_id ?? payload.id,
+    status: payload.status,
+    errors: payload.error ? [payload.error] : payload.errors,
+  }];
 
-  if (message) {
-    const updates: Record<string, unknown> = {
-      provider_status: status,
-    };
+  let processed = 0;
+  for (const item of statuses) {
+    const providerMessageId = (item.id ?? item.message_id) as string | undefined;
+    const status = String(item.status ?? 'unknown').toLowerCase();
+    const errorMessage = ((item.errors as Array<Record<string, unknown>> | undefined)?.[0]?.message
+      ?? (item.error as Record<string, unknown> | undefined)?.message
+      ?? null) as string | null;
 
-    if (status === 'delivered') updates.delivered_at = timestamp;
-    if (status === 'read') updates.read_at = timestamp;
+    if (!providerMessageId) continue;
+
+    const { data: message } = await supabase
+      .from('messages')
+      .select('id, lead_id, conversation_id')
+      .eq('provider_message_id', providerMessageId)
+      .maybeSingle();
+    if (!message) continue;
+
+    const updates: Record<string, unknown> = { provider_status: status };
+    const ts = new Date().toISOString();
+    if (status === 'delivered') updates.delivered_at = ts;
+    if (status === 'read') updates.read_at = ts;
     if (status === 'failed') updates.provider_error = errorMessage;
 
     await supabase.from('messages').update(updates).eq('id', message.id);
-
     await supabase.from('lead_events').insert({
       lead_id: message.lead_id,
       conversation_id: message.conversation_id,
       event_type: 'provider_message_status_updated',
       actor_type: 'provider',
-      event_payload: {
-        provider_message_id: providerMessageId,
-        status,
-        error_message: errorMessage,
-      },
+      event_payload: { provider_message_id: providerMessageId, status, error_message: errorMessage, correlation_id: correlationId },
     });
+    processed++;
   }
 
-  await supabase.from('integration_logs').insert({
-    source: 'provider_status_webhook',
-    status: 'success',
-    lead_id: message?.lead_id || null,
-    request_data: payload,
-    response_data: {
-      provider_message_id: providerMessageId,
-      status,
-      matched_message: !!message,
-    },
-  });
-
-  return jsonResponse({ ok: true, matchedMessage: !!message });
+  return jsonResponse(req, { ok: true, processed });
 });

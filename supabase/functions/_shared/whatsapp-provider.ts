@@ -1,12 +1,22 @@
+// Provider-aware WhatsApp adapter. Wraps Meta Cloud API and WATI behind one
+// interface, supports freeform/template send modes, and applies a small
+// jittered retry on transient failures (5xx / network).
+
 import { toWhatsAppPhone } from './phone.ts';
-import type { NormalizedInboundMessage, OutboundSendResult } from './provider-types.ts';
+import type { NormalizedInboundMessage, OutboundSendResult, TemplateParam } from './provider-types.ts';
+import { env } from './env.ts';
+import { log } from './logger.ts';
 
-const WHATSAPP_TOKEN = Deno.env.get('WHATSAPP_TOKEN') || '';
-const WHATSAPP_PHONE_ID = Deno.env.get('WHATSAPP_PHONE_ID') || '';
-const WATI_TOKEN = Deno.env.get('WATI_TOKEN') || '';
-const WATI_API_URL = Deno.env.get('WATI_API_URL') || 'https://live-mt-server.wati.io';
+const DEFAULT_RETRIES = 2;
+const DEFAULT_BACKOFF_MS = 400;
 
-export const activeProviderName = WHATSAPP_TOKEN && WHATSAPP_PHONE_ID ? 'meta_cloud_api' : WATI_TOKEN ? 'wati' : 'none';
+export type ProviderName = 'meta_cloud_api' | 'wati' | 'none';
+
+export function activeProvider(): ProviderName {
+  if (env.whatsappToken() && env.whatsappPhoneId()) return 'meta_cloud_api';
+  if (env.watiToken()) return 'wati';
+  return 'none';
+}
 
 export function normalizeProviderInbound(payload: Record<string, unknown>): NormalizedInboundMessage | null {
   const now = new Date().toISOString();
@@ -22,6 +32,7 @@ export function normalizeProviderInbound(payload: Record<string, unknown>): Norm
     const contact = contacts?.[0];
     const profile = contact?.profile as Record<string, unknown> | undefined;
     const textObj = msg.text as Record<string, unknown> | undefined;
+    const type = typeof msg.type === 'string' ? msg.type : 'unknown';
 
     return {
       provider: 'meta_cloud_api',
@@ -29,55 +40,78 @@ export function normalizeProviderInbound(payload: Record<string, unknown>): Norm
       phone: String(msg.from || ''),
       senderName: typeof profile?.name === 'string' ? profile.name : null,
       text: typeof textObj?.body === 'string' ? textObj.body : null,
-      messageType: typeof msg.type === 'string' ? (msg.type === 'text' ? 'text' : 'media') : 'unknown',
-      mediaType: typeof msg.type === 'string' ? msg.type : null,
+      messageType: type === 'text' ? 'text' : type === 'unknown' ? 'unknown' : 'media',
+      mediaType: type === 'text' ? null : type,
       rawPayload: payload,
       receivedAt: now,
     };
   }
 
-  if (typeof payload.waId === 'string' || typeof payload.senderPhone === 'string' || typeof payload.phone === 'string' || typeof payload.from === 'string') {
+  if (typeof payload.waId === 'string' || typeof payload.senderPhone === 'string'
+      || typeof payload.phone === 'string' || typeof payload.from === 'string') {
+    const message = payload.message as Record<string, unknown> | undefined;
+    const text = typeof payload.text === 'string'
+      ? payload.text
+      : typeof message?.text === 'string' ? String(message.text) : null;
     return {
       provider: 'wati',
       providerMessageId: typeof payload.id === 'string' ? payload.id : null,
       phone: String(payload.waId || payload.senderPhone || payload.phone || payload.from || ''),
-      senderName: typeof payload.senderName === 'string'
-        ? payload.senderName
-        : typeof payload.pushName === 'string'
-          ? payload.pushName
-          : typeof payload.name === 'string'
-            ? payload.name
-            : null,
-      text: typeof payload.text === 'string'
-        ? payload.text
-        : typeof (payload.message as Record<string, unknown> | undefined)?.text === 'string'
-          ? String((payload.message as Record<string, unknown>).text)
-          : null,
-      messageType: typeof payload.text === 'string' ? 'text' : 'unknown',
+      senderName:
+        typeof payload.senderName === 'string' ? payload.senderName :
+        typeof payload.pushName === 'string' ? payload.pushName :
+        typeof payload.name === 'string' ? payload.name : null,
+      text,
+      messageType: text ? 'text' : 'unknown',
       rawPayload: payload,
       receivedAt: now,
     };
   }
-
   return null;
 }
 
+async function withRetry<T>(label: string, fn: () => Promise<T>, retries = DEFAULT_RETRIES): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (attempt === retries) break;
+      const jitter = Math.floor(Math.random() * 100);
+      const delay = DEFAULT_BACKOFF_MS * Math.pow(2, attempt) + jitter;
+      log.warn('whatsapp_retry', { fn: label, attempt, delay, err: String(err) });
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw lastErr;
+}
+
 export async function sendWhatsAppText(phone: string, text: string): Promise<OutboundSendResult> {
-  if (activeProviderName === 'meta_cloud_api') {
-    return sendMetaText(phone, text);
-  }
-  if (activeProviderName === 'wati') {
-    return sendWatiText(phone, text);
-  }
+  const provider = activeProvider();
+  if (provider === 'meta_cloud_api') return withRetry('meta_text', () => sendMetaText(phone, text));
+  if (provider === 'wati') return withRetry('wati_text', () => sendWatiText(phone, text));
+  return { ok: false, error: 'No WhatsApp provider configured' };
+}
+
+export async function sendWhatsAppTemplate(
+  phone: string,
+  templateName: string,
+  params: TemplateParam[] = [],
+  language = 'he',
+): Promise<OutboundSendResult> {
+  const provider = activeProvider();
+  if (provider === 'meta_cloud_api') return withRetry('meta_template', () => sendMetaTemplate(phone, templateName, params, language));
+  if (provider === 'wati') return withRetry('wati_template', () => sendWatiTemplate(phone, templateName, params));
   return { ok: false, error: 'No WhatsApp provider configured' };
 }
 
 async function sendMetaText(phone: string, text: string): Promise<OutboundSendResult> {
   const to = toWhatsAppPhone(phone);
-  const res = await fetch(`https://graph.facebook.com/v21.0/${WHATSAPP_PHONE_ID}/messages`, {
+  const res = await fetch(`https://graph.facebook.com/v21.0/${env.whatsappPhoneId()}/messages`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+      Authorization: `Bearer ${env.whatsappToken()}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
@@ -87,29 +121,86 @@ async function sendMetaText(phone: string, text: string): Promise<OutboundSendRe
       text: { body: text },
     }),
   });
-
   if (!res.ok) {
-    return { ok: false, error: await res.text() };
+    const errText = await res.text();
+    if (res.status >= 500) throw new Error(`meta_5xx:${res.status}:${errText.slice(0, 120)}`);
+    return { ok: false, error: errText };
   }
-
   const json = await res.json();
-  const messageId = json.messages?.[0]?.id as string | undefined;
-  return { ok: true, providerMessageId: messageId };
+  return { ok: true, providerMessageId: json.messages?.[0]?.id as string | undefined };
+}
+
+async function sendMetaTemplate(
+  phone: string,
+  templateName: string,
+  params: TemplateParam[],
+  language: string,
+): Promise<OutboundSendResult> {
+  const to = toWhatsAppPhone(phone);
+  const res = await fetch(`https://graph.facebook.com/v21.0/${env.whatsappPhoneId()}/messages`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${env.whatsappToken()}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      to,
+      type: 'template',
+      template: {
+        name: templateName,
+        language: { code: language },
+        components: params.length
+          ? [{ type: 'body', parameters: params.map((p) => ({ type: 'text', text: p.value })) }]
+          : undefined,
+      },
+    }),
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    if (res.status >= 500) throw new Error(`meta_5xx:${res.status}:${errText.slice(0, 120)}`);
+    return { ok: false, error: errText };
+  }
+  const json = await res.json();
+  return { ok: true, providerMessageId: json.messages?.[0]?.id as string | undefined };
 }
 
 async function sendWatiText(phone: string, text: string): Promise<OutboundSendResult> {
   const to = toWhatsAppPhone(phone);
-  const res = await fetch(`${WATI_API_URL}/api/v1/sendSessionMessage/${to}?messageText=${encodeURIComponent(text)}`, {
+  const res = await fetch(
+    `${env.watiApiUrl()}/api/v1/sendSessionMessage/${to}?messageText=${encodeURIComponent(text)}`,
+    { method: 'POST', headers: { Authorization: `Bearer ${env.watiToken()}` } },
+  );
+  if (!res.ok) {
+    const errText = await res.text();
+    if (res.status >= 500) throw new Error(`wati_5xx:${res.status}:${errText.slice(0, 120)}`);
+    return { ok: false, error: errText };
+  }
+  return { ok: true };
+}
+
+async function sendWatiTemplate(
+  phone: string,
+  templateName: string,
+  params: TemplateParam[],
+): Promise<OutboundSendResult> {
+  const to = toWhatsAppPhone(phone);
+  const res = await fetch(`${env.watiApiUrl()}/api/v1/sendTemplateMessage?whatsappNumber=${to}`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${WATI_TOKEN}`,
+      Authorization: `Bearer ${env.watiToken()}`,
       'Content-Type': 'application/json',
     },
+    body: JSON.stringify({
+      template_name: templateName,
+      broadcast_name: `karnaf_${templateName}`,
+      parameters: params.map((p) => ({ name: p.name, value: p.value })),
+    }),
   });
-
   if (!res.ok) {
-    return { ok: false, error: await res.text() };
+    const errText = await res.text();
+    if (res.status >= 500) throw new Error(`wati_5xx:${res.status}:${errText.slice(0, 120)}`);
+    return { ok: false, error: errText };
   }
-
   return { ok: true };
 }

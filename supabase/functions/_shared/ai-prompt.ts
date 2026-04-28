@@ -1,32 +1,75 @@
 import type { AiDecisionContext } from './ai-contract.ts';
+import type { Playbook } from './playbooks.ts';
+import type { PromptOverrides } from './prompt-variant.ts';
 
-export function buildAiSystemPrompt(): string {
+export const RESPONSE_SCHEMA_HINT = `Return JSON exactly matching this shape (Hebrew for replyText/notesForMia):
+{
+  "replyText": string|null,
+  "intentClassification": string,
+  "leadStatusUpdate": string|null,
+  "leadHeatUpdate": string|null,
+  "scoreDelta": integer,
+  "escalateToMia": boolean,
+  "escalateToPhoneSales": boolean,
+  "createQueueType": string|null,
+  "nextActionType": string|null,
+  "nextActionDueAt": string|null,
+  "notesForMia": string|null,
+  "sendMode": "freeform"|"template"|"manual_only"|"no_send",
+  "policyFlags": string[]
+}`;
+
+export function buildAiSystemPrompt(
+  playbook: Playbook,
+  ctx: AiDecisionContext,
+  overrides: PromptOverrides = {},
+): string {
+  const product = ctx.runtimeConfig.product;
+  const objective = typeof overrides.objective === 'string' && overrides.objective.length > 0
+    ? overrides.objective
+    : playbook.objective;
+  const guidance = Array.isArray(overrides.guidance) && overrides.guidance.length > 0
+    ? overrides.guidance
+    : playbook.guidance;
   return [
-    'You are the Karnaf CRM Core AI operator for the product "הדרך לדירה".',
-    'Your job is not only to answer messages, but to help operate a WhatsApp-first CRM flow safely.',
-    'You must avoid guarantees about returns, savings, success, or specific outcomes.',
-    'You should prefer clarity, professionalism, relevance, and short WhatsApp-style answers.',
-    'The default goal is to move the lead forward intelligently, escalate to Mia when needed, and preserve trust.',
-    'Return structured JSON only.',
-  ].join(' ');
+    `You are the Karnaf CRM operator for the Hebrew-speaking digital program "${product.displayName}".`,
+    `Channel is WhatsApp. Tone: personal, professional, courteous, never aggressive, no flattery, max one emoji when natural.`,
+    `Active playbook: ${playbook.name}. Objective: ${objective}`,
+    `Guidance:`,
+    ...guidance.map((g) => ` - ${g}`),
+    `Forbidden phrases (never produce, paraphrase, or imply): ${[...playbook.forbidden, ...ctx.runtimeConfig.forbiddenClaims].join('; ')}`,
+    `Pricing context (do not promise discounts unless instructed): typical ${product.priceTypicalIls} ILS, floor ${product.priceMinIls} ILS.`,
+    `Reply length: <= ${ctx.runtimeConfig.ai.maxReplyChars} characters. WhatsApp style: short paragraphs, no markdown headings.`,
+    `Allowed lead_status transitions for this turn: ${playbook.allowedNextStatuses.join(', ')}; otherwise leave leadStatusUpdate null.`,
+    `Policy flags you may add: free_advice_overflow, partner_block, financial_sensitivity, off_topic, payment_block, after_hours.`,
+    `Always return valid JSON. ${RESPONSE_SCHEMA_HINT}`,
+  ].join('\n');
 }
 
-export function buildAiUserPrompt(context: AiDecisionContext): string {
-  const recentMessages = context.recentMessages
-    .map((message) => `${message.senderType}: ${message.contentText || ''}`)
+export function buildAiUserPrompt(ctx: AiDecisionContext): string {
+  const recent = ctx.recentMessages
+    .slice()
+    .reverse()
+    .map((m) => `${m.senderType}: ${m.contentText ?? ''}`)
     .join('\n');
 
   return [
-    `Lead name: ${context.lead.fullName || 'unknown'}`,
-    `Source: ${context.lead.source}`,
-    `Current status: ${context.lead.status}`,
-    `Current heat: ${context.lead.heat}`,
-    `Current score: ${context.lead.score}`,
-    `Ownership mode: ${context.lead.ownershipMode}`,
-    `Payment status: ${context.lead.paymentStatus || 'none'}`,
-    `Conversation summary: ${context.lead.conversationSummary || 'none'}`,
-    'Recent messages:',
-    recentMessages || 'none',
-    'Produce a structured decision for the next CRM action and next WhatsApp reply.',
+    `Lead profile:`,
+    `  id: ${ctx.lead.id}`,
+    `  name: ${ctx.lead.fullName ?? 'unknown'}`,
+    `  source: ${ctx.lead.source}`,
+    `  status: ${ctx.lead.status}`,
+    `  heat: ${ctx.lead.heat}`,
+    `  score: ${ctx.lead.score}`,
+    `  ownership: ${ctx.lead.ownershipMode}`,
+    `  paymentStatus: ${ctx.lead.paymentStatus ?? 'none'}`,
+    `  freeAdviceCount: ${ctx.freeAdviceCount}`,
+    `  lastInboundAt: ${ctx.lead.lastInboundAt ?? 'none'}`,
+    `Conversation summary (older context, condensed):`,
+    `  ${ctx.lead.conversationSummary ?? '(none)'}`,
+    `Recent messages (oldest -> newest):`,
+    recent || '(none)',
+    `Active hours ${ctx.runtimeConfig.activeHours.start}-${ctx.runtimeConfig.activeHours.end} ${ctx.runtimeConfig.activeHours.timezone}.`,
+    `Decide the next CRM action and the next WhatsApp reply. Return JSON only.`,
   ].join('\n');
 }
