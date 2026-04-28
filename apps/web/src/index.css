@@ -1,0 +1,122 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Heebo', 'Assistant', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --color-brand-50: oklch(0.97 0.01 270);
+  --color-brand-100: oklch(0.93 0.04 270);
+  --color-brand-500: oklch(0.55 0.15 270);
+  --color-brand-600: oklch(0.48 0.16 270);
+  --color-brand-700: oklch(0.4 0.17 270);
+  --radius-card: 0.75rem;
+}
+
+html { direction: rtl; font-family: var(--font-sans); }
+body {
+  @apply bg-slate-50 text-slate-900 antialiased;
+  background-image:
+    radial-gradient(60rem 40rem at 100% -10%, color-mix(in oklab, var(--color-brand-500) 10%, transparent) 0%, transparent 60%),
+    radial-gradient(50rem 30rem at -10% 110%, color-mix(in oklab, var(--color-brand-500) 8%, transparent) 0%, transparent 60%);
+  background-attachment: fixed;
+}
+:focus-visible { @apply outline-2 outline-offset-2 outline-brand-500; }
+
+/* Component primitives */
+.kf-card { @apply rounded-xl border border-slate-200 bg-white shadow-sm; }
+.kf-btn { @apply inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100; }
+.kf-btn-primary { @apply border-transparent bg-brand-600 text-white shadow hover:bg-brand-700; }
+.kf-btn-danger { @apply border-transparent bg-rose-600 text-white shadow hover:bg-rose-700; }
+.kf-btn-ghost { @apply border-transparent bg-transparent text-slate-600 shadow-none hover:bg-slate-100; }
+.kf-input { @apply block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm transition focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500; }
+.kf-badge { @apply inline-flex items-center rounded-md px-2 py-1 text-xs font-medium; }
+.kf-badge-hot { @apply bg-rose-50 text-rose-700; }
+.kf-badge-warm { @apply bg-amber-50 text-amber-700; }
+.kf-badge-cool { @apply bg-sky-50 text-sky-700; }
+.kf-badge-cold { @apply bg-slate-100 text-slate-600; }
+.kf-badge-success { @apply bg-emerald-50 text-emerald-700; }
+.kf-badge-mute { @apply bg-slate-100 text-slate-600; }
+
+/* Tables */
+.kf-table { @apply w-full text-sm; }
+.kf-table thead { @apply bg-slate-50 text-slate-600; }
+.kf-table th { @apply text-right p-3 font-medium tracking-tight; }
+.kf-table tbody tr { @apply border-t border-slate-100 transition hover:bg-slate-50/70; }
+.kf-table td { @apply p-3 align-middle; }
+
+/* Horizontal-scroll wrapper for tables that must keep their grid on mobile. */
+.kf-table-scroll { @apply -mx-4 overflow-x-auto sm:mx-0; }
+.kf-table-scroll > table { @apply min-w-[40rem]; }
+
+/* Responsive "card-rows": tables that collapse into stacked cards below md. */
+@media (max-width: 47.99rem) {
+  .kf-table-responsive { display: block; }
+  .kf-table-responsive thead { display: none; }
+  .kf-table-responsive tbody { display: block; }
+  .kf-table-responsive tbody tr {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.25rem 0.75rem;
+    border: 1px solid rgb(226 232 240);
+    border-radius: 0.5rem;
+    background: white;
+    padding: 0.75rem 0.875rem;
+    margin: 0.5rem 0;
+  }
+  .kf-table-responsive tbody tr:hover { background: white; }
+  .kf-table-responsive tbody td {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding: 0.125rem 0;
+    border: none;
+    text-align: start;
+    gap: 0.75rem;
+  }
+  .kf-table-responsive tbody td[data-label]::before {
+    content: attr(data-label);
+    flex: 0 0 auto;
+    font-size: 0.75rem;
+    color: rgb(100 116 139);
+  }
+  .kf-table-responsive tbody td[data-primary] {
+    grid-column: 1 / -1;
+    display: block;
+    border-bottom: 1px solid rgb(241 245 249);
+    padding-bottom: 0.5rem;
+    margin-bottom: 0.25rem;
+    text-align: start;
+  }
+  .kf-table-responsive tbody td[data-primary]::before { display: none; }
+  .kf-table-responsive tbody td[data-actions] {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: flex-end;
+    border-top: 1px solid rgb(241 245 249);
+    padding-top: 0.5rem;
+    margin-top: 0.25rem;
+  }
+  .kf-table-responsive tbody td[data-actions]::before { display: none; }
+}
+
+/* Larger tap targets on touch devices without over-padding desktop. */
+@media (pointer: coarse) {
+  .kf-btn { @apply min-h-11 px-4; }
+  .kf-input { @apply py-2.5; }
+}
+
+/* Skeletons + status utilities */
+.kf-skeleton { @apply animate-pulse rounded bg-slate-200/70; }
+.kf-dot { @apply inline-block h-2 w-2 rounded-full; }
+
+/* Toasts */
+.kf-toast {
+  @apply pointer-events-auto flex items-start gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm shadow-lg;
+  animation: kf-toast-in 180ms ease-out;
+}
+.kf-toast-success { @apply border-emerald-200 bg-emerald-50/90 text-emerald-900; }
+.kf-toast-error { @apply border-rose-200 bg-rose-50/90 text-rose-900; }
+.kf-toast-info { @apply border-sky-200 bg-sky-50/90 text-sky-900; }
+
+@keyframes kf-toast-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
