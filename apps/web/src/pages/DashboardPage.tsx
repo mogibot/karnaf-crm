@@ -4,21 +4,22 @@ import type { DashboardSummary } from '@/lib/types';
 import { QUEUE_LABELS } from '@/lib/format';
 import { Link } from 'react-router-dom';
 import { useDocumentTitle } from '@/lib/useDocumentTitle';
+import { t } from '@/lib/i18n';
 
 export function DashboardPage() {
   const summaryQ = useQuery({ queryKey: ['dashboard-summary'], queryFn: fetchDashboardSummary });
   const queueQ = useQuery({ queryKey: ['queue', 'pending'], queryFn: () => fetchQueueList({ status: 'pending' }) });
-  useDocumentTitle('מסך מצב');
+  useDocumentTitle(t('dashboard_title'));
 
-  if (summaryQ.isLoading) return <p className="text-slate-500">טוען נתוני מצב...</p>;
-  if (summaryQ.error) return <p className="text-rose-600">שגיאה: {(summaryQ.error as Error).message}</p>;
+  if (summaryQ.isLoading) return <p className="text-slate-500">{t('loading')}</p>;
+  if (summaryQ.error) return <p className="text-rose-600">{t('error_prefix')}: {(summaryQ.error as Error).message}</p>;
 
   const s = summaryQ.data!;
 
   return (
     <div className="space-y-4 sm:space-y-6">
       <header className="flex items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">מסך מצב</h1>
+        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">{t('dashboard_title')}</h1>
         <button
           type="button" className="kf-btn kf-btn-ghost shrink-0"
           onClick={() => { summaryQ.refetch(); queueQ.refetch(); }}
@@ -28,38 +29,38 @@ export function DashboardPage() {
             <path strokeLinecap="round" d="M3 10a7 7 0 0 1 12-5l2 2M17 10a7 7 0 0 1-12 5l-2-2" />
             <path strokeLinecap="round" d="M14 5h3V2M6 15H3v3" />
           </svg>
-          <span className="hidden sm:inline">{summaryQ.isFetching || queueQ.isFetching ? 'מרענן...' : 'רענון'}</span>
+          <span className="hidden sm:inline">{summaryQ.isFetching || queueQ.isFetching ? t('refreshing') : t('refresh')}</span>
         </button>
       </header>
 
       <section className="grid grid-cols-2 gap-3 md:grid-cols-5">
-        <KpiCard label="לידים היום" value={s.leadsToday} icon={<IconSparkles />} />
-        <KpiCard label="ממתינים למענה" value={s.unansweredNow} tone={s.unansweredNow > 0 ? 'warn' : 'normal'}
+        <KpiCard label={t('kpi_leads_today')} value={s.leadsToday} icon={<IconSparkles />} />
+        <KpiCard label={t('kpi_unanswered')} value={s.unansweredNow} tone={s.unansweredNow > 0 ? 'warn' : 'normal'}
                  to="/queue?type=first_response_due" icon={<IconClock />} />
-        <KpiCard label="לידים חמים" value={s.hotLeadsNow} tone={s.hotLeadsNow > 0 ? 'hot' : 'normal'}
+        <KpiCard label={t('kpi_hot_leads')} value={s.hotLeadsNow} tone={s.hotLeadsNow > 0 ? 'hot' : 'normal'}
                  to="/leads?heat=hot" icon={<IconFlame />} />
-        <KpiCard label="ממתינים לתשלום" value={s.paymentPendingNow}
+        <KpiCard label={t('kpi_payment_pending')} value={s.paymentPendingNow}
                  to="/leads?status=payment_pending" icon={<IconCreditCard />} />
-        <KpiCard label="סיכון SLA" value={s.slaRiskCount} tone={s.slaRiskCount > 0 ? 'warn' : 'normal'}
+        <KpiCard label={t('kpi_sla_risk')} value={s.slaRiskCount} tone={s.slaRiskCount > 0 ? 'warn' : 'normal'}
                  to="/queue?type=sla_risk" icon={<IconAlert />} />
       </section>
 
       <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="kf-card p-4 sm:p-5">
           <div className="flex items-center justify-between gap-2">
-            <h2 className="text-lg font-semibold">משפך המרה</h2>
-            <span className="hidden text-xs text-slate-500 sm:inline">המרה שלב אחרי שלב</span>
+            <h2 className="text-lg font-semibold">{t('conversion_funnel')}</h2>
+            <span className="hidden text-xs text-slate-500 sm:inline">{t('conversion_step_over_step')}</span>
           </div>
           <FunnelBars funnel={s.funnel} />
         </div>
 
         <div className="kf-card p-4 sm:p-5">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold">תורי עבודה ממתינים</h2>
-            <Link to="/queue" className="text-xs text-brand-700 hover:underline">לכל התורים →</Link>
+            <h2 className="text-lg font-semibold">{t('pending_queues')}</h2>
+            <Link to="/queue" className="text-xs text-brand-700 hover:underline">{t('to_all_queues')}</Link>
           </div>
           {queueQ.isLoading ? (
-            <p className="mt-3 text-sm text-slate-500">טוען...</p>
+            <p className="mt-3 text-sm text-slate-500">{t('loading')}</p>
           ) : queueQ.data && queueQ.data.length > 0 ? (
             <ul className="mt-3 divide-y divide-slate-100">
               {queueQ.data.slice(0, 8).map((q) => (
@@ -76,13 +77,13 @@ export function DashboardPage() {
               ))}
             </ul>
           ) : (
-            <EmptyState message="אין פריטים פתוחים." />
+            <EmptyState message={t('no_pending_items')} />
           )}
         </div>
       </section>
 
       <section className="kf-card p-4 sm:p-5">
-        <h2 className="text-lg font-semibold">תורים לפי סוג</h2>
+        <h2 className="text-lg font-semibold">{t('queues_by_type')}</h2>
         <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
           {Object.entries(s.queueCounts).map(([key, count]) => (
             <Link

@@ -7,6 +7,7 @@ import { formatRelative, STATUS_LABELS, HEAT_LABELS, OWNERSHIP_LABELS } from '@/
 import type { LeadHeat, LeadStatus, OwnershipMode } from '@/lib/types';
 import { useDebouncedValue } from '@/lib/useDebouncedValue';
 import { useDocumentTitle } from '@/lib/useDocumentTitle';
+import { t } from '@/lib/i18n';
 
 const STATUSES: LeadStatus[] = [
   'new', 'first_contact_sent', 'responded', 'qualified', 'nurture',
@@ -24,7 +25,7 @@ export function LeadsPage() {
   const [heat, setHeat] = useState(searchParams.get('heat') ?? '');
   const [ownership, setOwnership] = useState(searchParams.get('ownership') ?? '');
   const [offset, setOffset] = useState(0);
-  useDocumentTitle('לידים');
+  useDocumentTitle(t('leads_title'));
 
   const debouncedSearch = useDebouncedValue(search, 200);
 
@@ -64,8 +65,8 @@ export function LeadsPage() {
   return (
     <div className="space-y-4">
       <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">לידים</h1>
-        <span className="text-sm text-slate-500">{total != null ? `${total} סה"כ` : ''}</span>
+        <h1 className="text-2xl font-semibold tracking-tight">{t('leads_title')}</h1>
+        <span className="text-sm text-slate-500">{total != null ? `${total} ${t('total_count')}` : ''}</span>
       </header>
 
       <div className="kf-card grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 md:grid-cols-5">
@@ -78,28 +79,28 @@ export function LeadsPage() {
             </span>
             <input
               className="kf-input pe-9"
-              placeholder="חיפוש לפי שם / טלפון / אימייל"
+              placeholder={t('search_placeholder')}
               value={search}
               onChange={(e) => { setSearch(e.target.value); setOffset(0); }}
             />
           </div>
         </div>
         <select className="kf-input" value={status} onChange={(e) => { setStatus(e.target.value); setOffset(0); }}>
-          <option value="">כל הסטטוסים</option>
+          <option value="">{t('filter_all_statuses')}</option>
           {STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
         </select>
         <select className="kf-input" value={heat} onChange={(e) => { setHeat(e.target.value); setOffset(0); }}>
-          <option value="">כל החום</option>
+          <option value="">{t('filter_all_heat')}</option>
           {HEATS.map((h) => <option key={h} value={h}>{HEAT_LABELS[h]}</option>)}
         </select>
         <select className="kf-input" value={ownership} onChange={(e) => { setOwnership(e.target.value); setOffset(0); }}>
-          <option value="">כל הבעלויות</option>
+          <option value="">{t('filter_all_ownership')}</option>
           {OWNERS.map((o) => <option key={o} value={o}>{OWNERSHIP_LABELS[o]}</option>)}
         </select>
         {hasFilters ? (
           <div className="sm:col-span-2 md:col-span-5">
             <button type="button" className="kf-btn kf-btn-ghost text-xs" onClick={clearFilters}>
-              ניקוי סינונים
+              {t('filter_clear')}
             </button>
           </div>
         ) : null}
@@ -109,18 +110,18 @@ export function LeadsPage() {
         <table className="kf-table kf-table-responsive">
           <thead>
             <tr>
-              <th>שם</th>
-              <th>טלפון</th>
-              <th>סטטוס</th>
-              <th>חום</th>
-              <th>בעלות</th>
-              <th>ציון</th>
-              <th>עודכן</th>
+              <th>{t('table_name')}</th>
+              <th>{t('table_phone')}</th>
+              <th>{t('table_status')}</th>
+              <th>{t('table_heat')}</th>
+              <th>{t('table_ownership')}</th>
+              <th>{t('table_score')}</th>
+              <th>{t('table_updated')}</th>
             </tr>
           </thead>
           <tbody>
             {q.isLoading ? (
-              <tr><td colSpan={7} className="p-6 text-center text-slate-500">טוען...</td></tr>
+              <tr><td colSpan={7} className="p-6 text-center text-slate-500">{t('loading')}</td></tr>
             ) : q.data && q.data.leads.length > 0 ? (
               q.data.leads.map((lead) => (
                 <tr key={lead.id}>
@@ -132,16 +133,16 @@ export function LeadsPage() {
                       <div className="text-xs text-slate-500 break-all">{lead.email}</div>
                     ) : null}
                   </td>
-                  <td data-label="טלפון" className="tabular-nums">
+                  <td data-label={t('table_phone')} className="tabular-nums">
                     {lead.phone ? (
                       <a href={`tel:${lead.phone}`} className="hover:text-brand-700 hover:underline">{lead.phone}</a>
                     ) : '—'}
                   </td>
-                  <td data-label="סטטוס"><StatusBadge status={lead.lead_status} /></td>
-                  <td data-label="חום"><HeatBadge heat={lead.lead_heat} /></td>
-                  <td data-label="בעלות"><OwnershipBadge ownership={lead.ownership_mode} /></td>
-                  <td data-label="ציון" className="tabular-nums">{lead.lead_score}</td>
-                  <td data-label="עודכן" className="text-slate-500" title={lead.updated_at}>{formatRelative(lead.updated_at)}</td>
+                  <td data-label={t('table_status')}><StatusBadge status={lead.lead_status} /></td>
+                  <td data-label={t('table_heat')}><HeatBadge heat={lead.lead_heat} /></td>
+                  <td data-label={t('table_ownership')}><OwnershipBadge ownership={lead.ownership_mode} /></td>
+                  <td data-label={t('table_score')} className="tabular-nums">{lead.lead_score}</td>
+                  <td data-label={t('table_updated')} className="text-slate-500" title={lead.updated_at}>{formatRelative(lead.updated_at)}</td>
                 </tr>
               ))
             ) : (
@@ -150,7 +151,7 @@ export function LeadsPage() {
                   <svg viewBox="0 0 24 24" className="h-8 w-8 text-slate-300" fill="none" stroke="currentColor" strokeWidth="1.5">
                     <circle cx="11" cy="11" r="7" /><path strokeLinecap="round" d="m16 16 4 4" />
                   </svg>
-                  <span>אין לידים תואמים.</span>
+                  <span>{t('no_matching_leads')}</span>
                 </div>
               </td></tr>
             )}
@@ -160,13 +161,13 @@ export function LeadsPage() {
 
       <div className="flex items-center justify-between text-sm">
         <button type="button" className="kf-btn" disabled={offset === 0}
-                onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}>הקודם</button>
+                onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}>{t('pagination_prev')}</button>
         <span className="text-slate-500 tabular-nums">
           {start != null && end != null ? `${start}–${end} מתוך ${total}` : `עמוד ${Math.floor(offset / PAGE_SIZE) + 1}`}
         </span>
         <button type="button" className="kf-btn"
                 disabled={!q.data || q.data.leads.length < PAGE_SIZE}
-                onClick={() => setOffset((o) => o + PAGE_SIZE)}>הבא</button>
+                onClick={() => setOffset((o) => o + PAGE_SIZE)}>{t('pagination_next')}</button>
       </div>
     </div>
   );

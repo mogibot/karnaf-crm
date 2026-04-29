@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom';
 import { useAuth } from './auth-context';
 import { Spinner } from '@/components/Spinner';
 import { useDocumentTitle } from '@/lib/useDocumentTitle';
+import { t } from '@/lib/i18n';
 
 type Mode = 'login' | 'signup';
 
@@ -15,7 +16,7 @@ export function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
-  useDocumentTitle(mode === 'signup' ? 'הרשמה' : 'כניסה');
+  useDocumentTitle(mode === 'signup' ? t('sign_up') : t('sign_in'));
 
   if (auth.session && auth.role) return <Navigate to="/" replace />;
 
@@ -37,7 +38,7 @@ export function LoginPage() {
     } else {
       if (password.length < 8) {
         setSubmitting(false);
-        setError('הסיסמה חייבת לכלול לפחות 8 תווים');
+        setError(t('password_too_short'));
         return;
       }
       const { error, needsEmailConfirmation } = await auth.signUp(email, password);
@@ -47,18 +48,18 @@ export function LoginPage() {
         return;
       }
       if (needsEmailConfirmation) {
-        setInfo('נשלח אימייל לאימות הכתובת. יש ללחוץ על הקישור ואז לחזור להתחברות.');
+        setInfo(t('email_confirmation_sent'));
         setMode('login');
         setPassword('');
       } else {
-        setInfo('המשתמש נוצר. ממתין להפעלת פרופיל על ידי מנהל המערכת.');
+        setInfo(t('account_created_pending_admin'));
       }
     }
   }
 
   const isSignup = mode === 'signup';
-  const submitLabel = isSignup ? 'הרשמה' : 'התחברות';
-  const submittingLabel = isSignup ? 'נרשם...' : 'מתחבר...';
+  const submitLabel = isSignup ? t('sign_up') : t('sign_in');
+  const submittingLabel = isSignup ? t('signing_up') : t('signing_in');
 
   return (
     <main className="relative grid min-h-screen place-items-center overflow-hidden p-4 sm:p-6">
@@ -82,13 +83,13 @@ export function LoginPage() {
             </svg>
           </span>
           <div>
-            <h1 className="text-xl font-semibold">Karnaf CRM</h1>
-            <p className="text-sm text-slate-500">{isSignup ? 'יצירת משתמש חדש' : 'כניסת מפעיל'}</p>
+            <h1 className="text-xl font-semibold">{t('app_name')}</h1>
+            <p className="text-sm text-slate-500">{isSignup ? t('signup_title') : t('login_title')}</p>
           </div>
         </div>
 
         <label className="block text-sm">
-          <span className="text-slate-700">אימייל</span>
+          <span className="text-slate-700">{t('email_label')}</span>
           <input
             type="email" autoComplete="email" required
             className="kf-input mt-1"
@@ -99,7 +100,7 @@ export function LoginPage() {
         </label>
 
         <div className="block text-sm">
-          <label htmlFor="login-password" className="text-slate-700">סיסמה</label>
+          <label htmlFor="login-password" className="text-slate-700">{t('password_label')}</label>
           <div className="relative mt-1">
             <input
               id="login-password"
@@ -111,7 +112,7 @@ export function LoginPage() {
             />
             <button
               type="button"
-              aria-label={showPassword ? 'הסתרת סיסמה' : 'הצגת סיסמה'}
+              aria-label={showPassword ? t('hide_password') : t('show_password')}
               aria-pressed={showPassword}
               onClick={() => setShowPassword((v) => !v)}
               className="absolute inset-y-0 end-2 my-auto inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-700"
@@ -133,7 +134,7 @@ export function LoginPage() {
             </button>
           </div>
           {isSignup ? (
-            <p className="mt-1 text-xs text-slate-500">לפחות 8 תווים</p>
+            <p className="mt-1 text-xs text-slate-500">{t('password_min_hint')}</p>
           ) : null}
         </div>
 
@@ -152,16 +153,16 @@ export function LoginPage() {
         <p className="text-center text-sm text-slate-600">
           {isSignup ? (
             <>
-              כבר יש לך חשבון?{' '}
+              {t('has_account')}{' '}
               <button type="button" className="font-medium text-brand-700 hover:underline" onClick={() => switchMode('login')}>
-                התחברות
+                {t('sign_in')}
               </button>
             </>
           ) : (
             <>
-              אין לך עדיין חשבון?{' '}
+              {t('no_account')}{' '}
               <button type="button" className="font-medium text-brand-700 hover:underline" onClick={() => switchMode('signup')}>
-                הרשמה
+                {t('sign_up')}
               </button>
             </>
           )}
@@ -169,7 +170,7 @@ export function LoginPage() {
 
         {auth.session && !auth.role ? (
           <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">
-            המשתמש מחובר אך אין לו פרופיל פעיל. צרו קשר עם מנהל המערכת.
+            {t('user_no_active_profile')}
           </p>
         ) : null}
       </form>
