@@ -147,6 +147,28 @@ export interface PromptVariantOutcome {
   leads_lost: number;
 }
 
+export interface LeadCohortRow {
+  cohort_week: string;
+  source: string;
+  leads_total: number;
+  responded: number;
+  qualified: number;
+  checkout_pushed: number;
+  won: number;
+  lost: number;
+  win_rate_pct: number;
+  avg_minutes_to_win: number;
+}
+
+export interface FirstResponseTimeRow {
+  source: string;
+  measured_leads: number;
+  p50_minutes: number;
+  p90_minutes: number;
+  max_minutes: number;
+  unanswered_leads: number;
+}
+
 export async function fetchAnalyticsSummary() {
   return getJson<{
     ok: true;
@@ -155,6 +177,8 @@ export async function fetchAnalyticsSummary() {
     recentActivity: RecentActivityRow[];
     aiVsHuman: AiVsHumanRow[];
     promptVariants: PromptVariantOutcome[];
+    cohorts: LeadCohortRow[];
+    firstResponseTimes: FirstResponseTimeRow[];
   }>('/analytics-summary');
 }
 

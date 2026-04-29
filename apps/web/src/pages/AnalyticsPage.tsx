@@ -12,7 +12,7 @@ export function AnalyticsPage() {
   if (q.error) return <p className="text-rose-600">שגיאה: {(q.error as Error).message}</p>;
   if (!q.data) return null;
 
-  const { sourcePerformance, aging, recentActivity, aiVsHuman, promptVariants } = q.data;
+  const { sourcePerformance, aging, recentActivity, aiVsHuman, promptVariants, cohorts, firstResponseTimes } = q.data;
 
   return (
     <div className="space-y-6">
@@ -99,6 +99,90 @@ export function AnalyticsPage() {
             </table>
           </div>
         </div>
+      </section>
+
+      <section className="kf-card p-4 sm:p-5">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-lg font-semibold">זמן מענה ראשון לפי מקור</h2>
+          <span className="hidden text-xs text-slate-500 sm:inline">SLA יעד: 12 שעות</span>
+        </div>
+        {firstResponseTimes.length === 0 ? (
+          <p className="mt-3 text-sm text-slate-500">אין נתונים. הוסף את המיגרציה האחרונה (`v_first_response_times`) או חכה לליד ראשון.</p>
+        ) : (
+          <div className="mt-3 -mx-4 overflow-x-auto sm:mx-0">
+            <table className="kf-table min-w-[36rem]">
+              <thead>
+                <tr>
+                  <th>מקור</th>
+                  <th>נמדדו</th>
+                  <th>חציון</th>
+                  <th>P90</th>
+                  <th>מקסימום</th>
+                  <th>ללא מענה</th>
+                </tr>
+              </thead>
+              <tbody>
+                {firstResponseTimes.map((row) => (
+                  <tr key={row.source}>
+                    <td className="font-medium">{row.source}</td>
+                    <td className="tabular-nums">{row.measured_leads}</td>
+                    <td className="tabular-nums">{formatMinutes(row.p50_minutes)}</td>
+                    <td className="tabular-nums">{formatMinutes(row.p90_minutes)}</td>
+                    <td className="tabular-nums">{formatMinutes(row.max_minutes)}</td>
+                    <td className={row.unanswered_leads > 0 ? 'tabular-nums text-rose-700' : 'tabular-nums text-slate-500'}>
+                      {row.unanswered_leads}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <section className="kf-card p-4 sm:p-5">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-lg font-semibold">קבוצות לפי שבוע ומקור</h2>
+          <span className="hidden text-xs text-slate-500 sm:inline">חודשיים אחרונים, ISO-week</span>
+        </div>
+        {cohorts.length === 0 ? (
+          <p className="mt-3 text-sm text-slate-500">אין נתונים עדיין.</p>
+        ) : (
+          <div className="mt-3 -mx-4 overflow-x-auto sm:mx-0">
+            <table className="kf-table min-w-[44rem]">
+              <thead>
+                <tr>
+                  <th>שבוע</th>
+                  <th>מקור</th>
+                  <th>סה"כ</th>
+                  <th>הגיב</th>
+                  <th>הוסמך</th>
+                  <th>קישור רכישה</th>
+                  <th>נסגר</th>
+                  <th>אבד</th>
+                  <th>% המרה</th>
+                  <th>ימים לסגירה</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cohorts.map((c, i) => (
+                  <tr key={`${c.cohort_week}::${c.source}::${i}`}>
+                    <td className="tabular-nums">{formatWeek(c.cohort_week)}</td>
+                    <td className="font-medium">{c.source}</td>
+                    <td className="tabular-nums">{c.leads_total}</td>
+                    <td className="tabular-nums">{c.responded}</td>
+                    <td className="tabular-nums">{c.qualified}</td>
+                    <td className="tabular-nums">{c.checkout_pushed}</td>
+                    <td className="tabular-nums text-emerald-700">{c.won}</td>
+                    <td className="tabular-nums text-slate-500">{c.lost}</td>
+                    <td className="tabular-nums">{c.win_rate_pct}%</td>
+                    <td className="tabular-nums">{c.avg_minutes_to_win > 0 ? Math.round(c.avg_minutes_to_win / 60 / 24) : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
 
       <section className="kf-card p-4 sm:p-5">
@@ -192,4 +276,12 @@ function formatMinutes(minutes: number): string {
   if (hours < 24) return `${hours} שעות`;
   const days = Math.round(hours / 24);
   return `${days} ימים`;
+}
+
+function formatWeek(iso: string): string {
+  // Display the cohort start date (Monday) as a short DD/MM/YY label.
+  const ts = Date.parse(iso);
+  if (!Number.isFinite(ts)) return iso;
+  const d = new Date(ts);
+  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getFullYear()).slice(-2)}`;
 }
