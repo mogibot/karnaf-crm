@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from './auth-context';
 import { Spinner } from '@/components/Spinner';
 import { useDocumentTitle } from '@/lib/useDocumentTitle';
@@ -9,6 +9,8 @@ type Mode = 'login' | 'signup';
 
 export function LoginPage() {
   const auth = useAuth();
+  const [params] = useSearchParams();
+  const next = params.get('next') || '/';
   const [mode, setMode] = useState<Mode>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -16,9 +18,8 @@ export function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  const [googleSubmitting, setGoogleSubmitting] = useState(false);
   useDocumentTitle(mode === 'signup' ? t('sign_up') : t('sign_in'));
-
-  if (auth.session && auth.role) return <Navigate to="/" replace />;
 
   function switchMode(next: Mode) {
     setMode(next);
@@ -55,6 +56,26 @@ export function LoginPage() {
         setInfo(t('account_created_pending_admin'));
       }
     }
+  }
+
+  async function onGoogleSignIn() {
+    setGoogleSubmitting(true);
+    setError(null);
+    setInfo(null);
+    const { error } = await auth.signInWithGoogle();
+    if (error) {
+      setError(error);
+      setGoogleSubmitting(false);
+      return;
+    }
+  }
+
+  // Authenticated users with an active profile bounce to the post-login
+  // destination. Users with a session but no role stay here so the warning
+  // about "profile not active" is visible.
+  if (auth.session && auth.role) {
+    const safeNext = next.startsWith('/') && !next.startsWith('//') ? next : '/';
+    return <Navigate to={safeNext} replace />;
   }
 
   const isSignup = mode === 'signup';
@@ -146,7 +167,18 @@ export function LoginPage() {
           <p role="status" className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{info}</p>
         ) : null}
 
-        <button type="submit" className="kf-btn kf-btn-primary w-full" disabled={submitting}>
+        {!isSignup ? (
+          <button
+            type="button"
+            className="kf-btn w-full border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+            onClick={onGoogleSignIn}
+            disabled={googleSubmitting || submitting}
+          >
+            {googleSubmitting ? <><Spinner /> {t('sign_in_with_google')}</> : t('sign_in_with_google')}
+          </button>
+        ) : null}
+
+        <button type="submit" className="kf-btn kf-btn-primary w-full" disabled={submitting || googleSubmitting}>
           {submitting ? <><Spinner /> {submittingLabel}</> : submitLabel}
         </button>
 

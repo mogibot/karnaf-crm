@@ -6,6 +6,7 @@ export type StaffRole = 'owner' | 'admin' | 'mia' | 'sales_rep' | 'viewer';
 export interface AuthenticatedStaff {
   userId: string;
   email: string | null;
+  fullName: string | null;
   role: StaffRole;
   client: SupabaseClient;
 }
@@ -38,7 +39,7 @@ export async function requireStaff(
 
   const { data: profile, error: profileErr } = await client
     .from('profiles')
-    .select('role, is_active')
+    .select('role, is_active, full_name')
     .eq('id', userId)
     .maybeSingle();
 
@@ -49,5 +50,5 @@ export async function requireStaff(
   const allow = options.allow ?? (options.requireWrite ? writerRoles : ['owner', 'admin', 'mia', 'sales_rep', 'viewer']);
   if (!allow.includes(role)) throw new AuthError(403, `Role '${role}' not permitted`);
 
-  return { userId, email, role, client };
+  return { userId, email, fullName: profile.full_name ?? null, role, client };
 }

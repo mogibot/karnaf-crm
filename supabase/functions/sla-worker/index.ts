@@ -17,7 +17,11 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return jsonResponse(req, { error: 'Method not allowed' }, 405);
 
   const correlationId = correlationFromRequest(req);
-  const expected = env.slaWorkerSecret() || env.serviceRoleKey();
+  const expected = env.slaWorkerSecret();
+  if (!expected) {
+    log.error('sla_worker_secret_missing', { fn: 'sla-worker', correlationId });
+    return jsonResponse(req, { error: 'Worker secret not configured' }, 500);
+  }
   if (!verifyBearer(req, expected)) return jsonResponse(req, { error: 'Unauthorized' }, 401);
 
   const supabase = getServiceSupabase();

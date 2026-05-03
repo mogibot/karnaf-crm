@@ -82,7 +82,7 @@ afterEach(() => vi.clearAllMocks());
 describe('AnalyticsPage', () => {
   it('shows loading state, then a row per source', async () => {
     renderAnalytics();
-    expect(screen.getByText(/טוען נתונים/)).toBeInTheDocument();
+    expect(screen.getByText((content) => content.includes('טוען... נתונים...'))).toBeInTheDocument();
     await waitFor(() => expect(screen.getAllByText('webinar').length).toBeGreaterThan(0));
     expect(screen.getAllByText('whatsapp_direct').length).toBeGreaterThan(0);
     // win_rate_pct rendered with the % suffix in the bar — appears multiple

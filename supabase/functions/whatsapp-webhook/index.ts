@@ -33,12 +33,18 @@ Deno.serve(async (req) => {
 
   const rawBody = await req.text();
 
-  // Meta sends X-Hub-Signature-256. WATI uses bearer-style auth on its
-  // webhook config; for WATI, requiring a verify token in the URL has the
-  // same effect, so we tolerate the missing header but require app secret
-  // for Meta-style payloads.
-  if (env.whatsappAppSecret() && req.headers.get('x-hub-signature-256')) {
-    const valid = await verifyMetaSignature(req, rawBody, env.whatsappAppSecret());
+  // Meta sends X-Hub-Signature-256; WATI uses bearer auth on its webhook
+  // config. If we have a Meta app secret configured, require the signature
+  // header on every POST — silently accepting unsigned bodies would let any
+  // attacker who finds the URL inject inbound messages.
+  const metaSecret = env.whatsappAppSecret();
+  if (metaSecret) {
+    const sigHeader = req.headers.get('x-hub-signature-256');
+    if (!sigHeader) {
+      log.warn('whatsapp_signature_missing', { fn: 'whatsapp-webhook', correlationId });
+      return jsonResponse(req, { error: 'Missing signature' }, 401);
+    }
+    const valid = await verifyMetaSignature(req, rawBody, metaSecret);
     if (!valid) {
       log.warn('whatsapp_signature_invalid', { fn: 'whatsapp-webhook', correlationId });
       return jsonResponse(req, { error: 'Invalid signature' }, 401);

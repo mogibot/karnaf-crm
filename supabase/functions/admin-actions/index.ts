@@ -2,7 +2,7 @@ import { jsonResponse, preflight } from '../_shared/cors.ts';
 import { getServiceSupabase } from '../_shared/supabase.ts';
 import { ensurePendingQueueItem, resolveQueueItem } from '../_shared/queue-service.ts';
 import { logLeadEvent, transitionLeadStatus, updateLeadFields } from '../_shared/lead-service.ts';
-import { AuthError, requireStaff } from '../_shared/auth.ts';
+import { AuthError, requireStaff, type StaffRole } from '../_shared/auth.ts';
 import { correlationFromRequest, log } from '../_shared/logger.ts';
 
 type ActionName =
@@ -14,6 +14,20 @@ type ActionName =
   | 'mark_won'
   | 'resolve_queue'
   | 'log_phone_call';
+
+// Per-action role allowlist. Sales reps can only log their own calls and
+// resolve queue items; lifecycle transitions (won/lost/dnc/handoff) and
+// ownership re-routing belong to Mia / admins / owners.
+const ACTION_ROLES: Record<ActionName, StaffRole[]> = {
+  assign_to_mia: ['owner', 'admin', 'mia'],
+  return_to_ai: ['owner', 'admin', 'mia'],
+  mark_phone_escalation: ['owner', 'admin', 'mia'],
+  mark_dnc: ['owner', 'admin', 'mia'],
+  mark_lost: ['owner', 'admin', 'mia'],
+  mark_won: ['owner', 'admin', 'mia'],
+  resolve_queue: ['owner', 'admin', 'mia', 'sales_rep'],
+  log_phone_call: ['owner', 'admin', 'mia', 'sales_rep'],
+};
 
 interface ActionPayload {
   action: ActionName;
@@ -34,6 +48,8 @@ Deno.serve(async (req) => {
 
   let staff;
   try {
+    // Allow any staff role through the door; per-action gating runs below
+    // once we know which action was requested.
     staff = await requireStaff(req, { allow: ['owner', 'admin', 'mia', 'sales_rep'] });
   } catch (err) {
     if (err instanceof AuthError) return jsonResponse(req, { error: err.message }, err.status);
@@ -44,6 +60,12 @@ Deno.serve(async (req) => {
   const { action, leadId, conversationId, queueItemId, note, callOutcome, callDurationMinutes } = body;
 
   if (!action) return jsonResponse(req, { error: 'Missing action' }, 400);
+
+  const allowedRoles = ACTION_ROLES[action];
+  if (!allowedRoles) return jsonResponse(req, { error: 'Unsupported action' }, 400);
+  if (!allowedRoles.includes(staff.role)) {
+    return jsonResponse(req, { error: `Role '${staff.role}' not permitted for action '${action}'` }, 403);
+  }
 
   const supabase = getServiceSupabase();
 
