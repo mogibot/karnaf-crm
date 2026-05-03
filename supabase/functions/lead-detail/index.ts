@@ -29,6 +29,20 @@ Deno.serve(async (req) => {
 
   if (leadRes.error) return jsonResponse(req, { error: leadRes.error.message }, 404);
 
+  // Surface secondary query failures rather than returning silently empty
+  // arrays — those would look like "no messages" / "no events" to the
+  // operator and hide a real DB problem.
+  const secondary = [
+    { label: 'conversations', err: conversationsRes.error },
+    { label: 'messages', err: messagesRes.error },
+    { label: 'queueItems', err: queueRes.error },
+    { label: 'tasks', err: tasksRes.error },
+    { label: 'events', err: eventsRes.error },
+  ].find((r) => r.err);
+  if (secondary) {
+    return jsonResponse(req, { error: `${secondary.label}: ${secondary.err!.message}` }, 500);
+  }
+
   return jsonResponse(req, {
     ok: true,
     lead: leadRes.data,

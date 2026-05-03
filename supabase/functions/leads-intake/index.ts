@@ -82,13 +82,14 @@ Deno.serve(async (req) => {
     matched_via: phone && lead.phone === phone ? 'phone' : email && lead.email === email ? 'email' : 'new',
   });
 
-  // Source-specific first-response SLA.
+  // Source-specific first-response SLA, expressed in minutes for a single
+  // source of truth; fallback is the runtime config (also minutes).
   const config = await getRuntimeConfig(supabase);
-  const slaHoursBySource: Record<string, number> = {
-    whatsapp_direct: 0.5, instagram_dm: 0.5,
-    webinar: 2, lead_magnet: 8, responder_form: 4, landing_page: 4,
+  const slaMinutesBySource: Record<string, number> = {
+    whatsapp_direct: 30, instagram_dm: 30,
+    webinar: 120, lead_magnet: 480, responder_form: 240, landing_page: 240,
   };
-  const minutes = (slaHoursBySource[source] ?? config.followUpDelays.firstResponseMinutes / 60) * 60;
+  const minutes = slaMinutesBySource[source] ?? config.followUpDelays.firstResponseMinutes;
   const dueAt = new Date(Date.now() + minutes * 60 * 1000).toISOString();
 
   await ensurePendingQueueItem(supabase, {

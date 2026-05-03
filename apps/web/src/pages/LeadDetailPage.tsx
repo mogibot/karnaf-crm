@@ -104,32 +104,36 @@ export function LeadDetailPage() {
           <DataRow label="יצא לאחרונה" value={formatRelative(lead.last_outbound_at)} />
         </dl>
 
-        <div className="mt-4 flex flex-wrap gap-2">
-          <ActionGroup label="בעלות">
-            <button type="button" className="kf-btn" onClick={() => action.mutate({ action: 'assign_to_mia', label: 'הועבר למיה' })}>
-              העברה למיה
-            </button>
-            <button type="button" className="kf-btn" onClick={() => action.mutate({ action: 'return_to_ai', label: 'הוחזר ל-AI' })}>
-              החזרה ל-AI
-            </button>
-            <button type="button" className="kf-btn" onClick={() => action.mutate({ action: 'mark_phone_escalation', label: 'סומן לשיחה' })}>
-              סימון לשיחה
-            </button>
-          </ActionGroup>
-          <ActionGroup label="סטטוס">
-            <button type="button" className="kf-btn kf-btn-primary" onClick={() => action.mutate({ action: 'mark_won', label: 'נסגר ברכישה' })}>
-              סימון כסגירה
-            </button>
-            <button type="button" className="kf-btn" onClick={() => action.mutate({ action: 'mark_lost', note: 'manual_close', label: 'סומן כאבוד' })}>
-              סימון כאבוד
-            </button>
-          </ActionGroup>
-          <ActionGroup label="הסרה">
-            <button type="button" className="kf-btn kf-btn-danger" onClick={() => action.mutate({ action: 'mark_dnc', label: 'סומן כ-DNC' })}>
-              DNC
-            </button>
-          </ActionGroup>
-        </div>
+        {/* Lifecycle/ownership transitions are restricted server-side to
+            owner / admin / mia; hide them for sales_rep so the UI matches. */}
+        {auth.role === 'owner' || auth.role === 'admin' || auth.role === 'mia' ? (
+          <div className="mt-4 flex flex-wrap gap-2">
+            <ActionGroup label="בעלות">
+              <button type="button" className="kf-btn" onClick={() => action.mutate({ action: 'assign_to_mia', label: 'הועבר למיה' })}>
+                העברה למיה
+              </button>
+              <button type="button" className="kf-btn" onClick={() => action.mutate({ action: 'return_to_ai', label: 'הוחזר ל-AI' })}>
+                החזרה ל-AI
+              </button>
+              <button type="button" className="kf-btn" onClick={() => action.mutate({ action: 'mark_phone_escalation', label: 'סומן לשיחה' })}>
+                סימון לשיחה
+              </button>
+            </ActionGroup>
+            <ActionGroup label="סטטוס">
+              <button type="button" className="kf-btn kf-btn-primary" onClick={() => action.mutate({ action: 'mark_won', label: 'נסגר ברכישה' })}>
+                סימון כסגירה
+              </button>
+              <button type="button" className="kf-btn" onClick={() => action.mutate({ action: 'mark_lost', note: 'manual_close', label: 'סומן כאבוד' })}>
+                סימון כאבוד
+              </button>
+            </ActionGroup>
+            <ActionGroup label="הסרה">
+              <button type="button" className="kf-btn kf-btn-danger" onClick={() => action.mutate({ action: 'mark_dnc', label: 'סומן כ-DNC' })}>
+                DNC
+              </button>
+            </ActionGroup>
+          </div>
+        ) : null}
         {action.error ? <p className="mt-2 text-sm text-rose-600">{(action.error as Error).message}</p> : null}
       </header>
 

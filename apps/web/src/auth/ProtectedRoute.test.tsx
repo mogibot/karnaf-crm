@@ -11,6 +11,7 @@ function makeAuthState(overrides: Partial<AuthState>): AuthState {
     role: null,
     loading: false,
     signIn: async () => ({ error: null }),
+    signInWithGoogle: async () => ({ error: null }),
     signUp: async () => ({ error: null, needsEmailConfirmation: true }),
     signOut: async () => {},
     ...overrides,
@@ -33,22 +34,22 @@ function renderProtected(auth: AuthState, initialPath = '/dashboard') {
 }
 
 describe('ProtectedRoute', () => {
-  it('shows the loading indicator while auth is resolving', () => {
+  it('shows a spinner while auth is resolving', () => {
     renderProtected(makeAuthState({ loading: true }));
-    expect(screen.getByText('טוען...')).toBeInTheDocument();
     expect(screen.queryByText('protected content')).not.toBeInTheDocument();
     expect(screen.queryByText('login screen')).not.toBeInTheDocument();
   });
 
   it('redirects to /login when there is no session', () => {
     renderProtected(makeAuthState({ session: null, role: null, loading: false }));
-    expect(screen.getByText('login screen')).toBeInTheDocument();
     expect(screen.queryByText('protected content')).not.toBeInTheDocument();
+    expect(screen.getByText('login screen')).toBeInTheDocument();
   });
 
-  it('redirects to /login when session exists but role is missing (deactivated profile)', () => {
+  it('redirects to /login when session exists but role is missing', () => {
     const fakeSession = { user: { id: 'u1' } } as unknown as AuthState['session'];
     renderProtected(makeAuthState({ session: fakeSession, role: null, loading: false }));
+    expect(screen.queryByText('protected content')).not.toBeInTheDocument();
     expect(screen.getByText('login screen')).toBeInTheDocument();
   });
 

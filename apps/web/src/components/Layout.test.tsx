@@ -20,6 +20,7 @@ function makeAuth({ role = 'viewer', email = 'op@example.com', signOut = async (
     role,
     loading: false,
     signIn: async () => ({ error: null }),
+    signInWithGoogle: async () => ({ error: null }),
     signUp: async () => ({ error: null, needsEmailConfirmation: true }),
     signOut,
   };

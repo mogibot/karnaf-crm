@@ -41,6 +41,7 @@ function makeAuth(role: Role | null, userId = 'admin-1'): AuthState {
     role,
     loading: false,
     signIn: async () => ({ error: null }),
+    signInWithGoogle: async () => ({ error: null }),
     signUp: async () => ({ error: null, needsEmailConfirmation: true }),
     signOut: async () => {},
   };

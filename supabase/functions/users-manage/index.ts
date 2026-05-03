@@ -23,6 +23,7 @@ interface UpdatePayload {
   role?: string;
   isActive?: boolean;
   fullName?: string | null;
+  password?: string;
 }
 type Payload = CreatePayload | UpdatePayload;
 
@@ -96,18 +97,39 @@ Deno.serve(async (req) => {
     }
     if (body.isActive !== undefined) updates.is_active = body.isActive;
     if (body.fullName !== undefined) updates.full_name = body.fullName;
-    if (Object.keys(updates).length === 0) {
-      return jsonResponse(req, { error: 'No fields to update' }, 400);
-    }
-    const { data, error } = await supabase
-      .from('profiles')
-      .update(updates)
-      .eq('id', body.userId)
-      .select('id, email, full_name, role, is_active')
-      .single();
-    if (error) return jsonResponse(req, { error: error.message }, 500);
 
-    log.info('user_updated', { fn: 'users-manage', correlationId, by: staff.userId, target: body.userId, updates });
+    if (body.password !== undefined) {
+      if (body.password.length < 12) return jsonResponse(req, { error: 'Password too short (>=12)' }, 400);
+      const authUpdate = await supabase.auth.admin.updateUserById(body.userId, {
+        password: body.password,
+      });
+      if (authUpdate.error) return jsonResponse(req, { error: authUpdate.error.message }, 400);
+    }
+
+    let data;
+    if (Object.keys(updates).length > 0) {
+      const profileUpdate = await supabase
+        .from('profiles')
+        .update(updates)
+        .eq('id', body.userId)
+        .select('id, email, full_name, role, is_active')
+        .single();
+      if (profileUpdate.error) return jsonResponse(req, { error: profileUpdate.error.message }, 500);
+      data = profileUpdate.data;
+    } else {
+      const profileRead = await supabase
+        .from('profiles')
+        .select('id, email, full_name, role, is_active')
+        .eq('id', body.userId)
+        .single();
+      if (profileRead.error) return jsonResponse(req, { error: profileRead.error.message }, 500);
+      data = profileRead.data;
+    }
+
+    log.info('user_updated', {
+      fn: 'users-manage', correlationId, by: staff.userId, target: body.userId,
+      updates: { ...updates, password: body.password !== undefined ? '[updated]' : undefined },
+    });
     return jsonResponse(req, { ok: true, profile: data });
   }
 

@@ -2,14 +2,15 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { fetchAnalyticsSummary } from '@/lib/api';
 import { STATUS_LABELS, formatRelative } from '@/lib/format';
+import { t } from '@/lib/i18n';
 import { useDocumentTitle } from '@/lib/useDocumentTitle';
 
 export function AnalyticsPage() {
   const q = useQuery({ queryKey: ['analytics'], queryFn: fetchAnalyticsSummary });
-  useDocumentTitle('אנליטיקה');
+  useDocumentTitle(t('analytics_title'));
 
-  if (q.isLoading) return <p className="text-slate-500">טוען נתונים...</p>;
-  if (q.error) return <p className="text-rose-600">שגיאה: {(q.error as Error).message}</p>;
+  if (q.isLoading) return <p className="text-slate-500">{t('loading')} נתונים...</p>;
+  if (q.error) return <p className="text-rose-600">{t('error_prefix')}: {(q.error as Error).message}</p>;
   if (!q.data) return null;
 
   const { sourcePerformance, aging, recentActivity, aiVsHuman, promptVariants, cohorts, firstResponseTimes } = q.data;
@@ -17,33 +18,33 @@ export function AnalyticsPage() {
   return (
     <div className="space-y-6">
       <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">אנליטיקה</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">{t('analytics_title')}</h1>
         <button
           type="button" className="kf-btn kf-btn-ghost"
           onClick={() => q.refetch()}
           disabled={q.isFetching}
-        >{q.isFetching ? 'מרענן...' : 'רענון'}</button>
+        >{q.isFetching ? t('refreshing') : t('refresh')}</button>
       </header>
 
       <section className="kf-card p-4 sm:p-5">
-        <h2 className="text-lg font-semibold">ביצועים לפי מקור</h2>
+        <h2 className="text-lg font-semibold">{t('analytics_by_source')}</h2>
         <div className="mt-3 -mx-4 overflow-x-auto sm:mx-0">
           <table className="kf-table min-w-[44rem]">
             <thead>
               <tr>
-                <th>מקור</th>
-                <th>סה"כ</th>
-                <th>פעילים</th>
-                <th>הוסמך</th>
-                <th>קישור רכישה</th>
-                <th>נסגר</th>
-                <th>אבד</th>
-                <th>% המרה</th>
+                <th>{t('analytics_source')}</th>
+                <th>{t('analytics_total')}</th>
+                <th>{t('analytics_engaged')}</th>
+                <th>{t('analytics_qualified')}</th>
+                <th>{t('analytics_checkout')}</th>
+                <th>{t('analytics_won')}</th>
+                <th>{t('analytics_lost')}</th>
+                <th>{t('analytics_conversion_pct')}</th>
               </tr>
             </thead>
             <tbody>
               {sourcePerformance.length === 0 ? (
-                <tr><td colSpan={8} className="p-4 text-center text-slate-500">אין נתונים.</td></tr>
+                <tr><td colSpan={8} className="p-4 text-center text-slate-500">{t('analytics_no_data')}</td></tr>
               ) : sourcePerformance.map((row) => (
                 <tr key={row.source}>
                   <td className="font-medium">{row.source}</td>
@@ -65,13 +66,13 @@ export function AnalyticsPage() {
 
       <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="kf-card p-4 sm:p-5">
-          <h2 className="text-lg font-semibold">זמן ממוצע במצב</h2>
+          <h2 className="text-lg font-semibold">{t('analytics_avg_time_in_status')}</h2>
           <div className="mt-3 space-y-2">
             {Object.entries(aging).map(([status, bucket]) => (
               <div key={status} className="flex flex-col gap-0.5 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                 <span className="text-slate-700">{STATUS_LABELS[status as keyof typeof STATUS_LABELS] ?? status}</span>
                 <span className="text-slate-500 tabular-nums">
-                  {bucket.count} לידים · ממוצע {formatMinutes(bucket.avgMinutes)} · מקס׳ {formatMinutes(bucket.maxMinutes)}
+                  {bucket.count} {t('analytics_leads_count_suffix')} · {t('analytics_average_prefix')} {formatMinutes(bucket.avgMinutes)} · {t('analytics_max_prefix')} {formatMinutes(bucket.maxMinutes)}
                 </span>
               </div>
             ))}
@@ -79,15 +80,15 @@ export function AnalyticsPage() {
         </div>
 
         <div className="kf-card p-4 sm:p-5">
-          <h2 className="text-lg font-semibold">השפעת AI מול אדם על תוצאה</h2>
+          <h2 className="text-lg font-semibold">{t('analytics_ai_vs_human')}</h2>
           <div className="mt-3 -mx-4 overflow-x-auto sm:mx-0">
             <table className="w-full min-w-[28rem] text-sm">
               <thead className="text-right text-slate-600">
-                <tr><th className="p-2">תבנית מגע</th><th className="p-2">סטטוס</th><th className="p-2">לידים</th></tr>
+                <tr><th className="p-2">{t('analytics_touch_pattern')}</th><th className="p-2">{t('analytics_status')}</th><th className="p-2">{t('analytics_leads')}</th></tr>
               </thead>
               <tbody>
                 {aiVsHuman.length === 0 ? (
-                  <tr><td colSpan={3} className="p-4 text-center text-slate-500">אין נתונים.</td></tr>
+                  <tr><td colSpan={3} className="p-4 text-center text-slate-500">{t('analytics_no_data')}</td></tr>
                 ) : aiVsHuman.map((row, i) => (
                   <tr key={`${row.touch_pattern}-${row.lead_status}-${i}`} className="border-t border-slate-100">
                     <td className="p-2">{row.touch_pattern}</td>
@@ -103,22 +104,22 @@ export function AnalyticsPage() {
 
       <section className="kf-card p-4 sm:p-5">
         <div className="flex items-center justify-between gap-2">
-          <h2 className="text-lg font-semibold">זמן מענה ראשון לפי מקור</h2>
-          <span className="hidden text-xs text-slate-500 sm:inline">SLA יעד: 12 שעות</span>
+          <h2 className="text-lg font-semibold">{t('analytics_first_response_title')}</h2>
+          <span className="hidden text-xs text-slate-500 sm:inline">{t('analytics_first_response_sla')}</span>
         </div>
         {firstResponseTimes.length === 0 ? (
-          <p className="mt-3 text-sm text-slate-500">אין נתונים. הוסף את המיגרציה האחרונה (`v_first_response_times`) או חכה לליד ראשון.</p>
+          <p className="mt-3 text-sm text-slate-500">{t('analytics_first_response_empty')}</p>
         ) : (
           <div className="mt-3 -mx-4 overflow-x-auto sm:mx-0">
             <table className="kf-table min-w-[36rem]">
               <thead>
                 <tr>
-                  <th>מקור</th>
-                  <th>נמדדו</th>
-                  <th>חציון</th>
-                  <th>P90</th>
-                  <th>מקסימום</th>
-                  <th>ללא מענה</th>
+                  <th>{t('analytics_source')}</th>
+                  <th>{t('analytics_measured')}</th>
+                  <th>{t('analytics_median')}</th>
+                  <th>{t('analytics_p90')}</th>
+                  <th>{t('analytics_max')}</th>
+                  <th>{t('analytics_unanswered')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -142,26 +143,26 @@ export function AnalyticsPage() {
 
       <section className="kf-card p-4 sm:p-5">
         <div className="flex items-center justify-between gap-2">
-          <h2 className="text-lg font-semibold">קבוצות לפי שבוע ומקור</h2>
-          <span className="hidden text-xs text-slate-500 sm:inline">חודשיים אחרונים, ISO-week</span>
+          <h2 className="text-lg font-semibold">{t('analytics_cohorts_title')}</h2>
+          <span className="hidden text-xs text-slate-500 sm:inline">{t('analytics_cohorts_hint')}</span>
         </div>
         {cohorts.length === 0 ? (
-          <p className="mt-3 text-sm text-slate-500">אין נתונים עדיין.</p>
+          <p className="mt-3 text-sm text-slate-500">{t('analytics_no_data_yet')}</p>
         ) : (
           <div className="mt-3 -mx-4 overflow-x-auto sm:mx-0">
             <table className="kf-table min-w-[44rem]">
               <thead>
                 <tr>
-                  <th>שבוע</th>
-                  <th>מקור</th>
-                  <th>סה"כ</th>
-                  <th>הגיב</th>
-                  <th>הוסמך</th>
-                  <th>קישור רכישה</th>
-                  <th>נסגר</th>
-                  <th>אבד</th>
-                  <th>% המרה</th>
-                  <th>ימים לסגירה</th>
+                  <th>{t('analytics_week')}</th>
+                  <th>{t('analytics_source')}</th>
+                  <th>{t('analytics_total')}</th>
+                  <th>{t('analytics_responded')}</th>
+                  <th>{t('analytics_qualified')}</th>
+                  <th>{t('analytics_checkout')}</th>
+                  <th>{t('analytics_won')}</th>
+                  <th>{t('analytics_lost')}</th>
+                  <th>{t('analytics_conversion_pct')}</th>
+                  <th>{t('analytics_days_to_win')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -187,29 +188,29 @@ export function AnalyticsPage() {
 
       <section className="kf-card p-4 sm:p-5">
         <div className="flex items-center justify-between gap-2">
-          <h2 className="text-lg font-semibold">A/B תבניות prompt</h2>
+          <h2 className="text-lg font-semibold">{t('analytics_prompt_ab')}</h2>
           <span className="hidden text-xs text-slate-500 sm:inline">
-            ניתן לערוך ב-`prompt_variants`. ברירת מחדל: גרסת config.
+            {t('analytics_prompt_hint')}
           </span>
         </div>
         {promptVariants.length === 0 ? (
           <p className="mt-3 text-sm text-slate-500">
-            אין גרסאות מוגדרות. ה-AI ירוץ בגרסה היחידה שב-`crm_config.ai_runtime`.
+            {t('analytics_prompt_empty')}
           </p>
         ) : (
           <div className="mt-3 -mx-4 overflow-x-auto sm:mx-0">
             <table className="kf-table min-w-[44rem]">
               <thead>
                 <tr>
-                  <th>Playbook</th>
-                  <th>Version</th>
-                  <th>החלטות</th>
-                  <th>הצליח</th>
-                  <th>נחסם</th>
-                  <th>לידים</th>
-                  <th>נסגר</th>
-                  <th>אבד</th>
-                  <th>% המרה</th>
+                  <th>{t('analytics_playbook')}</th>
+                  <th>{t('analytics_version')}</th>
+                  <th>{t('analytics_decisions')}</th>
+                  <th>{t('analytics_success')}</th>
+                  <th>{t('analytics_blocked')}</th>
+                  <th>{t('analytics_leads')}</th>
+                  <th>{t('analytics_won')}</th>
+                  <th>{t('analytics_lost')}</th>
+                  <th>{t('analytics_conversion_pct')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -236,10 +237,10 @@ export function AnalyticsPage() {
       </section>
 
       <section className="kf-card p-4 sm:p-5">
-        <h2 className="text-lg font-semibold">פעילות אחרונה</h2>
+        <h2 className="text-lg font-semibold">{t('analytics_recent_activity')}</h2>
         <ul className="mt-3 divide-y divide-slate-100 text-sm">
           {recentActivity.length === 0 ? (
-            <li className="p-2 text-slate-500">אין אירועים ב־24 שעות אחרונות.</li>
+            <li className="p-2 text-slate-500">{t('analytics_recent_empty')}</li>
           ) : recentActivity.map((row) => (
             <li key={row.id} className="flex items-center justify-between gap-3 py-2">
               <Link to={`/leads/${row.lead_id}`} className="min-w-0 flex-1 truncate text-slate-700 hover:text-brand-700">

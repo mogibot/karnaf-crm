@@ -77,7 +77,7 @@ Deno.serve(async (req) => {
     lead_id: leadId,
     provider_message_id: result.providerMessageId ?? null,
     sender_type: staff.role === 'sales_rep' ? 'sales_rep' : 'mia',
-    sender_name: staff.email,
+    sender_name: staff.fullName || staff.email,
     direction: 'outbound',
     message_type: mode === 'template' ? 'template' : 'text',
     content_text: text,

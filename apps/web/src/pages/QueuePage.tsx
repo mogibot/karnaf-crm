@@ -5,6 +5,7 @@ import { fetchQueueList, postQueueResolve } from '@/lib/api';
 import { QUEUE_LABELS, formatRelative } from '@/lib/format';
 import { HeatBadge, OwnershipBadge } from '@/components/Badge';
 import { useToast } from '@/components/Toast';
+import { t } from '@/lib/i18n';
 import { useDocumentTitle } from '@/lib/useDocumentTitle';
 
 const QUEUE_TYPES = [
@@ -23,7 +24,7 @@ export function QueuePage() {
   );
   const qc = useQueryClient();
   const toast = useToast();
-  useDocumentTitle('תורי עבודה');
+  useDocumentTitle(t('queue_title'));
 
   useEffect(() => {
     const next = new URLSearchParams();
@@ -41,7 +42,7 @@ export function QueuePage() {
     mutationFn: (queueItemId: string) => postQueueResolve({ queueItemId }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['queue'] });
-      toast.success('פריט נסגר');
+      toast.success(t('queue_item_closed'));
     },
     onError: (err) => toast.error((err as Error).message),
   });
@@ -51,20 +52,20 @@ export function QueuePage() {
   return (
     <div className="space-y-4">
       <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">תורי עבודה</h1>
-        <span className="text-sm text-slate-500">{total} פריטים</span>
+        <h1 className="text-2xl font-semibold tracking-tight">{t('queue_title')}</h1>
+        <span className="text-sm text-slate-500">{total} {t('queue_total_items')}</span>
       </header>
 
       <div className="-mx-4 flex items-center gap-2 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-        <StatusTab active={status === 'pending'} onClick={() => setStatus('pending')}>פתוחים</StatusTab>
-        <StatusTab active={status === 'claimed'} onClick={() => setStatus('claimed')}>בטיפול</StatusTab>
-        <StatusTab active={status === 'resolved'} onClick={() => setStatus('resolved')}>סגורים</StatusTab>
+        <StatusTab active={status === 'pending'} onClick={() => setStatus('pending')}>{t('queue_open')}</StatusTab>
+        <StatusTab active={status === 'claimed'} onClick={() => setStatus('claimed')}>{t('queue_claimed')}</StatusTab>
+        <StatusTab active={status === 'resolved'} onClick={() => setStatus('resolved')}>{t('queue_resolved')}</StatusTab>
       </div>
 
       <div className="kf-card p-4">
         <select className="kf-input w-full md:w-72" value={type} onChange={(e) => setType(e.target.value)}>
-          {QUEUE_TYPES.map((t) => (
-            <option key={t} value={t}>{t === '' ? 'כל הסוגים' : (QUEUE_LABELS[t] ?? t)}</option>
+          {QUEUE_TYPES.map((queueType) => (
+            <option key={queueType} value={queueType}>{queueType === '' ? t('queue_all_types') : (QUEUE_LABELS[queueType] ?? queueType)}</option>
           ))}
         </select>
       </div>
@@ -73,19 +74,19 @@ export function QueuePage() {
         <table className="kf-table kf-table-responsive">
           <thead>
             <tr>
-              <th>סוג</th>
-              <th>ליד</th>
-              <th>חום</th>
-              <th>בעלות</th>
-              <th>עדיפות</th>
-              <th>סיבה</th>
-              <th>נוצר</th>
-              <th>פעולות</th>
+              <th>{t('queue_type')}</th>
+              <th>{t('queue_lead')}</th>
+              <th>{t('queue_heat')}</th>
+              <th>{t('queue_ownership')}</th>
+              <th>{t('queue_priority')}</th>
+              <th>{t('queue_reason')}</th>
+              <th>{t('queue_created')}</th>
+              <th>{t('queue_actions')}</th>
             </tr>
           </thead>
           <tbody>
             {q.isLoading ? (
-              <tr><td colSpan={8} className="p-6 text-center text-slate-500">טוען...</td></tr>
+              <tr><td colSpan={8} className="p-6 text-center text-slate-500">{t('loading')}</td></tr>
             ) : q.data && q.data.length > 0 ? (
               q.data.map((row) => (
                 <tr key={row.id}>
@@ -113,9 +114,9 @@ export function QueuePage() {
                         type="button" className="kf-btn text-xs"
                         onClick={() => resolve.mutate(row.id)}
                         disabled={resolve.isPending}
-                      >סגירה</button>
+                      >{t('queue_close')}</button>
                     ) : (
-                      <span className="text-xs text-slate-500">{row.resolution_note || 'נסגר'}</span>
+                      <span className="text-xs text-slate-500">{row.resolution_note || t('queue_closed')}</span>
                     )}
                   </td>
                 </tr>
@@ -127,8 +128,8 @@ export function QueuePage() {
                     <svg viewBox="0 0 24 24" className="h-10 w-10 text-emerald-300" fill="none" stroke="currentColor" strokeWidth="1.5">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M5 12.5 9.5 17 19 7" />
                     </svg>
-                    <span className="font-medium text-slate-600">אין פריטים{type ? ` בקטגוריה ${QUEUE_LABELS[type] ?? type}` : ''}.</span>
-                    <span className="text-xs">תור עבודה ריק זה רגע טוב לרוץ עם ליד חדש.</span>
+                    <span className="font-medium text-slate-600">{t('queue_empty')}{type ? ` בקטגוריה ${QUEUE_LABELS[type] ?? type}` : ''}{t('queue_empty_suffix')}</span>
+                    <span className="text-xs">{t('queue_empty_hint')}</span>
                   </div>
                 </td>
               </tr>

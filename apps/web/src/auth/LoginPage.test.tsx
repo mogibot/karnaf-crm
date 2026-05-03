@@ -8,6 +8,7 @@ interface RenderOpts {
   session?: AuthState['session'];
   role?: Role | null;
   signIn?: AuthState['signIn'];
+  signInWithGoogle?: AuthState['signInWithGoogle'];
   signUp?: AuthState['signUp'];
 }
 
@@ -15,6 +16,7 @@ function makeAuth({
   session = null,
   role = null,
   signIn = async () => ({ error: null }),
+  signInWithGoogle = async () => ({ error: null }),
   signUp = async () => ({ error: null, needsEmailConfirmation: true }),
 }: RenderOpts): AuthState {
   return {
@@ -23,6 +25,7 @@ function makeAuth({
     role,
     loading: false,
     signIn,
+    signInWithGoogle,
     signUp,
     signOut: async () => {},
   };
@@ -48,14 +51,15 @@ describe('LoginPage', () => {
     expect(screen.getByText('כניסת מפעיל')).toBeInTheDocument();
     expect(screen.getByText('אימייל')).toBeInTheDocument();
     expect(screen.getByText('סיסמה')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'כניסה עם גוגל' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'התחברות' })).toBeInTheDocument();
   });
 
-  it('redirects to / when an authenticated session with role is present', () => {
+  it('redirects authenticated users with an active role away from the login screen', () => {
     const fakeSession = { user: { id: 'u1' } } as unknown as AuthState['session'];
     renderLogin({ session: fakeSession, role: 'admin' });
-    expect(screen.getByText('home outlet')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'התחברות' })).not.toBeInTheDocument();
+    expect(screen.getByText('home outlet')).toBeInTheDocument();
   });
 
   it('keeps the form visible when session exists but role is missing (deactivated profile) and shows the warning', () => {
@@ -81,6 +85,13 @@ describe('LoginPage', () => {
     fireEvent.change(screen.getByLabelText('סיסמה'), { target: { value: 'wrong-password' } });
     fireEvent.click(screen.getByRole('button', { name: 'התחברות' }));
     expect(await screen.findByText('Invalid credentials')).toBeInTheDocument();
+  });
+
+  it('calls signInWithGoogle when the Google button is pressed', async () => {
+    const signInWithGoogle = vi.fn(async () => ({ error: null }));
+    renderLogin({ signInWithGoogle });
+    fireEvent.click(screen.getByRole('button', { name: 'כניסה עם גוגל' }));
+    await waitFor(() => expect(signInWithGoogle).toHaveBeenCalledTimes(1));
   });
 
   it('switches to signup mode and calls signUp on submit', async () => {

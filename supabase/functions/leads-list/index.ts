@@ -2,10 +2,17 @@ import { jsonResponse, preflight } from '../_shared/cors.ts';
 import { getServiceSupabase } from '../_shared/supabase.ts';
 import { AuthError, requireStaff } from '../_shared/auth.ts';
 
-// PostgREST `or` interprets `,` and `()` syntactically, so user input must be
-// stripped of those characters before it reaches the filter string.
+// PostgREST `or` interprets several characters syntactically (`,` separates
+// filters, `()` group, `*` is the ilike wildcard, `%` is its alias, `:` is a
+// type cast prefix, and `\` is an escape). Anything that could break out of
+// the ilike value into a sibling filter has to go before the search string
+// reaches the query builder.
 function escapeForOr(input: string): string {
-  return input.replace(/[(),%*]/g, ' ').trim();
+  return input
+    .replace(/[(),%*:\\]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120);
 }
 
 Deno.serve(async (req) => {

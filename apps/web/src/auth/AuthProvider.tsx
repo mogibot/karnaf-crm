@@ -53,6 +53,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       return { error: error?.message ?? null };
     },
+    async signInWithGoogle() {
+      const redirectTo = `${window.location.origin}/`;
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo },
+      });
+      return { error: error?.message ?? null };
+    },
     async signUp(email, password) {
       const { data, error } = await supabase.auth.signUp({ email, password });
       if (error) return { error: error.message, needsEmailConfirmation: false };
