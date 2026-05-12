@@ -43,7 +43,11 @@ export async function runAiDecision(
   // Falls back to the static prompt_version configured in crm_config.
   let variant: PromptVariant | null = null;
   try {
-    variant = await pickPromptVariant(supabase, playbook.name);
+    variant = await pickPromptVariant(supabase, playbook.name, {
+      heat: context.lead.heat,
+      source: context.lead.source,
+      status: context.lead.status,
+    });
   } catch (err) {
     log.warn('variant_lookup_failed', { fn: 'runAiDecision', correlationId, err: String(err) });
   }
