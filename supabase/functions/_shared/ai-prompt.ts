@@ -86,6 +86,12 @@ export function buildAiUserPrompt(ctx: AiDecisionContext): string {
     recent || '(none)',
   ];
 
+  if (ctx.intentContext) {
+    lines.push(
+      `Inbound intent (heuristic): ${ctx.intentContext.intent} | sentiment: ${ctx.intentContext.sentiment} | confidence: ${ctx.intentContext.confidence}`,
+    );
+  }
+
   if (ctx.timeContext) {
     lines.push(`Temporal context:`);
     for (const l of formatTimeContextForPrompt(ctx.timeContext, ctx.runtimeConfig.activeHours.timezone)) {

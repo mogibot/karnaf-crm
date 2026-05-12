@@ -35,6 +35,8 @@ export async function runAiDecision(
     paymentStatus: context.lead.paymentStatus,
     hoursSinceLastInbound: hoursSinceInbound,
     freeAdviceCount: context.freeAdviceCount,
+    inferredIntent: context.intentContext?.intent,
+    intentConfidence: context.intentContext?.confidence,
   });
 
   // A/B variant: weighted random pick from active rows for this playbook.

@@ -67,6 +67,13 @@ export interface AiPersonaContext {
   };
 }
 
+export interface AiIntentContext {
+  intent: 'question' | 'objection' | 'buy_signal' | 'escalation_request' | 'chit_chat' | 'dnc_request' | 'unclear';
+  sentiment: 'positive' | 'neutral' | 'frustrated' | 'confused';
+  confidence: 'high' | 'medium' | 'low';
+  matchedKeywords?: string[];
+}
+
 export interface AiDecisionContext {
   lead: AiLeadContext;
   recentMessages: AiRecentMessage[];
@@ -75,6 +82,7 @@ export interface AiDecisionContext {
   timeContext?: AiTimeContext;
   recentAiQuestions?: string[];
   personaContext?: AiPersonaContext;
+  intentContext?: AiIntentContext;
 }
 
 export interface AiDecisionOutput {
