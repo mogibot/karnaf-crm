@@ -17,6 +17,7 @@ const QueuePage = lazy(() => import('@/pages/QueuePage').then((m) => ({ default:
 const AnalyticsPage = lazy(() => import('@/pages/AnalyticsPage').then((m) => ({ default: m.AnalyticsPage })));
 const UsersPage = lazy(() => import('@/pages/UsersPage').then((m) => ({ default: m.UsersPage })));
 const PromptVariantsPage = lazy(() => import('@/pages/PromptVariantsPage').then((m) => ({ default: m.PromptVariantsPage })));
+const PermissionsHelpPage = lazy(() => import('@/pages/PermissionsHelpPage').then((m) => ({ default: m.PermissionsHelpPage })));
 
 function PageFallback() {
   return (
@@ -42,6 +43,7 @@ const router = createBrowserRouter([
           { path: '/analytics', element: <Suspense fallback={<PageFallback />}><AnalyticsPage /></Suspense> },
           { path: '/users', element: <Suspense fallback={<PageFallback />}><UsersPage /></Suspense> },
           { path: '/prompts', element: <Suspense fallback={<PageFallback />}><PromptVariantsPage /></Suspense> },
+          { path: '/help/permissions', element: <Suspense fallback={<PageFallback />}><PermissionsHelpPage /></Suspense> },
           { path: '*', element: <Navigate to="/" replace /> },
         ],
       },
