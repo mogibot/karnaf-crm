@@ -136,7 +136,8 @@ describe('DashboardPage', () => {
     vi.mocked(fetchQueueList).mockResolvedValue([]);
     renderDashboard();
     await screen.findByText('מסך מצב');
-    await waitFor(() => expect(screen.getByText('אין פריטים פתוחים.')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('אין משימות פתוחות. הנה צעדים מומלצים:')).toBeInTheDocument());
+    expect(screen.getByRole('link', { name: 'בדיקת לידים חמים' })).toHaveAttribute('href', '/leads?heat=hot');
   });
 
   it('renders an error message when the summary query fails', async () => {

@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import clsx from 'clsx';
 import { useAuth } from '@/auth/auth-context';
 import { t, type TranslationKey } from '@/lib/i18n';
+import { RoleHelp } from '@/components/RoleHelp';
 
 interface NavItem { to: string; labelKey: TranslationKey; end?: boolean; adminOnly?: boolean; icon: ReactNode; }
 
@@ -74,7 +75,10 @@ export function Layout() {
             <div className="hidden items-center gap-3 sm:flex">
               <div className="text-end">
                 <div className="text-sm font-medium text-slate-700 leading-tight">{auth.user?.email}</div>
-                <div className="text-xs text-slate-500 leading-tight">{auth.role}</div>
+                <div className="flex items-center justify-end gap-1.5 text-xs text-slate-500 leading-tight">
+                  <span>{auth.role}</span>
+                  {auth.role ? <RoleHelp role={auth.role} /> : null}
+                </div>
               </div>
               <span
                 aria-hidden="true"

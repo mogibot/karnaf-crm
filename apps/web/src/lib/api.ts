@@ -60,6 +60,8 @@ export async function fetchDashboardSummary() {
 
 export interface LeadsListParams {
   status?: string; heat?: string; ownershipMode?: string; search?: string;
+  searchIn?: 'lead' | 'messages';
+  createdFrom?: string; createdTo?: string; inboundFrom?: string;
   limit?: number; offset?: number;
 }
 export async function fetchLeadsList(params: LeadsListParams = {}) {
@@ -90,9 +92,17 @@ export async function fetchQueueList(params: { queueType?: string; status?: stri
 
 export type AdminAction =
   | 'assign_to_mia' | 'return_to_ai' | 'mark_phone_escalation'
-  | 'mark_dnc' | 'mark_lost' | 'mark_won' | 'resolve_queue' | 'log_phone_call';
+  | 'mark_dnc' | 'mark_lost' | 'mark_won' | 'resolve_queue' | 'log_phone_call'
+  | 'update_lead_meta';
 
 export type CallOutcome = 'connected' | 'no_answer' | 'voicemail' | 'declined' | 'callback_requested';
+
+export interface LeadMetaUpdates {
+  goal_summary?: string | null;
+  pain_point_summary?: string | null;
+  main_blocker?: string | null;
+  next_action_type?: string | null;
+}
 
 export async function postAdminAction(payload: {
   action: AdminAction;
@@ -102,6 +112,7 @@ export async function postAdminAction(payload: {
   note?: string | null;
   callOutcome?: CallOutcome;
   callDurationMinutes?: number;
+  metaUpdates?: LeadMetaUpdates;
 }) {
   return postJson<{ ok: true; action: string }>('/admin-actions', payload);
 }
@@ -218,6 +229,12 @@ export type PlaybookName =
   | 'price_objection' | 'free_advice_boundary' | 'checkout_push'
   | 'payment_pending_rescue' | 'phone_request' | 'opt_out';
 
+export interface LeadSegmentFilter {
+  heat?: string[];
+  source?: string[];
+  status?: string[];
+}
+
 export interface PromptVariantRow {
   id: string;
   playbook_name: PlaybookName;
@@ -226,6 +243,7 @@ export interface PromptVariantRow {
   prompt_overrides: { objective?: string; guidance?: string[]; [key: string]: unknown };
   is_active: boolean;
   notes: string | null;
+  lead_segment_filter?: LeadSegmentFilter;
   created_at: string;
   updated_at: string;
 }
@@ -246,6 +264,7 @@ export async function postCreatePromptVariant(payload: {
   prompt_overrides?: PromptVariantRow['prompt_overrides'];
   is_active?: boolean;
   notes?: string | null;
+  lead_segment_filter?: LeadSegmentFilter;
 }) {
   return postJson<{ ok: true; variant: PromptVariantRow }>('/prompt-variants', { action: 'create', ...payload });
 }
@@ -256,6 +275,7 @@ export async function postUpdatePromptVariant(payload: {
   prompt_overrides?: PromptVariantRow['prompt_overrides'];
   is_active?: boolean;
   notes?: string | null;
+  lead_segment_filter?: LeadSegmentFilter;
 }) {
   return postJson<{ ok: true; variant: PromptVariantRow }>('/prompt-variants', { action: 'update', ...payload });
 }

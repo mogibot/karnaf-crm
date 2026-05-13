@@ -69,15 +69,15 @@ export function DashboardPage() {
                     <strong>{QUEUE_LABELS[q.queue_type] ?? q.queue_type}</strong>
                     <span className="text-slate-500"> · {q.leads?.full_name ?? '—'}</span>
                   </Link>
-                  <span className="inline-flex items-center gap-1 text-xs text-slate-500" title={`עדיפות ${q.priority_level}`}>
+                  <span className="inline-flex items-center gap-1 text-xs text-slate-500" title={`${t('priority')} ${q.priority_level}`}>
                     <PriorityDot priority={q.priority_level} />
-                    עדיפות {q.priority_level}
+                    {t('priority')} {q.priority_level}
                   </span>
                 </li>
               ))}
             </ul>
           ) : (
-            <EmptyState message={t('no_pending_items')} />
+            <EmptyStateGuidance />
           )}
         </div>
       </section>
@@ -174,6 +174,33 @@ function EmptyState({ message }: { message: string }) {
         <path d="M4 7v8a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7" />
       </svg>
       {message}
+    </div>
+  );
+}
+
+function EmptyStateGuidance() {
+  return (
+    <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50/40 p-4 text-sm text-slate-700">
+      <div className="flex items-center gap-2">
+        <svg viewBox="0 0 20 20" className="h-5 w-5 text-emerald-500" fill="none" stroke="currentColor" strokeWidth="1.7">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5 10.5 9 14l6-7" />
+        </svg>
+        <span className="font-medium text-emerald-800">אין משימות פתוחות. הנה צעדים מומלצים:</span>
+      </div>
+      <ol className="mt-2 list-decimal space-y-1 ps-6 text-slate-600">
+        <li>
+          <Link to="/leads?heat=hot" className="text-brand-700 hover:underline">בדיקת לידים חמים</Link>
+          {' '}— ודא שהבוט מתקדם איתם או שמיה יודעת לקחת.
+        </li>
+        <li>
+          <Link to="/leads" className="text-brand-700 hover:underline">סקירת לידים חדשים מהשעה האחרונה</Link>
+          {' '}— מקור / heat / סטטוס בכניסה.
+        </li>
+        <li>
+          <Link to="/queue?status=resolved" className="text-brand-700 hover:underline">סקירת פריטי תור שנסגרו היום</Link>
+          {' '}— זיהוי חזרות שמצדיקות שיפור בוט.
+        </li>
+      </ol>
     </div>
   );
 }
