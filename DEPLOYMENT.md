@@ -279,8 +279,23 @@ silently falls back to the heuristic if the model call fails.
 - **Monitoring**: hook up Logflare or Sentry by adding the appropriate env
   in §3 and wiring the front-end with `import.meta.env.VITE_SENTRY_DSN`
   (not yet implemented; add when ready).
-- **Backups**: Supabase auto-PITR is on by default. Verify retention
-  matches your RPO target in `Project Settings > Database > Backups`.
+- **Backups & RPO/RTO**: Supabase auto-PITR is on by default.
+  - **RPO target**: 15 minutes (Supabase WAL ships continuously).
+  - **RTO target**: 1 hour from "incident declared" to "operator can
+    log in to recovered project".
+  - **Retention**: 7 days on Free/Pro, 14 days on Team, 30 days on
+    Enterprise. Confirm under `Project Settings > Database > Backups`
+    and bump tier if the project owner needs more.
+  - **Restore drill (quarterly)**: spin up a fresh Supabase project,
+    run `supabase db dump --data-only -f drill.sql` from the active
+    project, then `supabase db reset` + `psql -f drill.sql` against
+    the drill project. Walk a fixture lead through orchestrate-message
+    to confirm RLS + RPCs survive the round-trip. Log the result in
+    a quarterly incident-readiness review.
+- **Sentry**: front-end uses `@sentry/react` when `VITE_SENTRY_DSN` is
+  set (see Phase 3.1). Replay records the 60 seconds around each
+  error; tracesSampleRate=0.1. Tune in the Sentry project UI rather
+  than rebuilding the front-end.
 - **Secrets rotation**: rotate `WHATSAPP_TOKEN` every 90 days, the
   webhook HMAC secrets every 30 days. Update the Vault entry + Edge
   Function secrets together to avoid a brief mismatch window.
