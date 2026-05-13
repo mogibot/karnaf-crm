@@ -125,6 +125,19 @@ export async function postQueueResolve(payload: { queueItemId: string; resolutio
   return postJson<{ ok: true }>('/queue-resolve', payload);
 }
 
+export type BulkLeadAction = 'assign_owner' | 'change_heat';
+
+export interface BulkLeadActionPayload {
+  action: BulkLeadAction;
+  leadIds: string[];
+  assigneeUserId?: string;
+  heat?: 'hot' | 'warm' | 'cool' | 'cold';
+}
+
+export async function postBulkLeadAction(payload: BulkLeadActionPayload) {
+  return postJson<{ ok: true; updated: number }>('/bulk-lead-actions', { ...payload });
+}
+
 // === Analytics ============================================================
 
 export interface SourcePerformanceRow {

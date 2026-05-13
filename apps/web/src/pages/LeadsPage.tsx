@@ -1,8 +1,11 @@
-import { useEffect, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
-import { fetchLeadsList } from '@/lib/api';
+import { fetchLeadsList, fetchUsersList, postBulkLeadAction } from '@/lib/api';
 import { HeatBadge, OwnershipBadge, StatusBadge } from '@/components/Badge';
+import { BulkActionBar } from '@/components/BulkActionBar';
+import { useToast } from '@/components/Toast';
+import { useAuth } from '@/auth/auth-context';
 import { formatRelative, STATUS_LABELS, HEAT_LABELS, OWNERSHIP_LABELS } from '@/lib/format';
 import type { LeadHeat, LeadStatus, OwnershipMode } from '@/lib/types';
 import { useDebouncedValue } from '@/lib/useDebouncedValue';
@@ -132,6 +135,40 @@ export function LeadsPage() {
     placeholderData: (prev) => prev,
   });
 
+  const auth = useAuth();
+  const canBulkEdit = auth.role === 'owner' || auth.role === 'admin' || auth.role === 'mia';
+  const usersQ = useQuery({
+    queryKey: ['profiles-active'],
+    queryFn: () => fetchUsersList(),
+    enabled: canBulkEdit,
+    staleTime: 60_000,
+  });
+  const assignableUsers = useMemo(
+    () => (usersQ.data ?? []).filter(
+      (u) => u.is_active && ['owner', 'admin', 'mia', 'sales_rep'].includes(u.role),
+    ),
+    [usersQ.data],
+  );
+
+  const toast = useToast();
+  const qc = useQueryClient();
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Clear selection when the user filters or paginates so the action bar
+  // never references rows the manager can't currently see.
+  useEffect(() => { setSelected(new Set()); }, [
+    debouncedSearch, status, heat, ownership, createdFrom, createdTo, inboundFrom, offset,
+  ]);
+
+  const bulkMut = useMutation({
+    mutationFn: postBulkLeadAction,
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['leads'] });
+      toast.success(`עודכנו ${res.updated} לידים`);
+      setSelected(new Set());
+    },
+    onError: (err) => toast.error((err as Error).message),
+  });
+
   const total = q.data?.total ?? null;
   const start = total != null ? offset + 1 : null;
   const end = total != null ? Math.min(offset + (q.data?.leads.length ?? 0), total) : null;
@@ -257,6 +294,27 @@ export function LeadsPage() {
         <table className="kf-table kf-table-responsive">
           <thead>
             <tr>
+              {canBulkEdit ? (
+                <th aria-label="בחירה" className="w-8">
+                  <input
+                    type="checkbox"
+                    aria-label="בחירה כללית"
+                    checked={
+                      (q.data?.leads.length ?? 0) > 0 &&
+                      (q.data?.leads.every((lead) => selected.has(lead.id)) ?? false)
+                    }
+                    onChange={(e) => {
+                      const next = new Set(selected);
+                      if (e.target.checked) {
+                        q.data?.leads.forEach((lead) => next.add(lead.id));
+                      } else {
+                        q.data?.leads.forEach((lead) => next.delete(lead.id));
+                      }
+                      setSelected(next);
+                    }}
+                  />
+                </th>
+              ) : null}
               <th>{t('table_name')}</th>
               <th>{t('table_phone')}</th>
               <th>{t('table_status')}</th>
@@ -268,10 +326,25 @@ export function LeadsPage() {
           </thead>
           <tbody>
             {q.isLoading ? (
-              <tr><td colSpan={7} className="p-6 text-center text-slate-500">{t('loading')}</td></tr>
+              <tr><td colSpan={canBulkEdit ? 8 : 7} className="p-6 text-center text-slate-500">{t('loading')}</td></tr>
             ) : q.data && q.data.leads.length > 0 ? (
               q.data.leads.map((lead) => (
-                <tr key={lead.id}>
+                <tr key={lead.id} className={selected.has(lead.id) ? 'bg-brand-50/50' : undefined}>
+                  {canBulkEdit ? (
+                    <td className="w-8" data-label="בחירה">
+                      <input
+                        type="checkbox"
+                        aria-label={`בחירת ${lead.full_name || lead.id}`}
+                        checked={selected.has(lead.id)}
+                        onChange={(e) => {
+                          const next = new Set(selected);
+                          if (e.target.checked) next.add(lead.id);
+                          else next.delete(lead.id);
+                          setSelected(next);
+                        }}
+                      />
+                    </td>
+                  ) : null}
                   <td data-primary>
                     <Link to={`/leads/${lead.id}`} className="font-medium text-brand-700 hover:underline">
                       {lead.full_name || '—'}
@@ -293,7 +366,7 @@ export function LeadsPage() {
                 </tr>
               ))
             ) : (
-              <tr><td colSpan={7} className="p-10 text-center text-slate-500">
+              <tr><td colSpan={canBulkEdit ? 8 : 7} className="p-10 text-center text-slate-500">
                 <div className="flex flex-col items-center gap-2">
                   <svg viewBox="0 0 24 24" className="h-8 w-8 text-slate-300" fill="none" stroke="currentColor" strokeWidth="1.5">
                     <circle cx="11" cy="11" r="7" /><path strokeLinecap="round" d="m16 16 4 4" />
@@ -305,6 +378,22 @@ export function LeadsPage() {
           </tbody>
         </table>
       </div>
+
+      {canBulkEdit ? (
+        <BulkActionBar
+          selectedCount={selected.size}
+          totalCount={q.data?.leads.length ?? 0}
+          assignableUsers={assignableUsers}
+          busy={bulkMut.isPending}
+          onClear={() => setSelected(new Set())}
+          onAssignOwner={(userId) =>
+            bulkMut.mutate({ action: 'assign_owner', leadIds: Array.from(selected), assigneeUserId: userId })
+          }
+          onChangeHeat={(h) =>
+            bulkMut.mutate({ action: 'change_heat', leadIds: Array.from(selected), heat: h })
+          }
+        />
+      ) : null}
 
       <div className="flex items-center justify-between text-sm">
         <button type="button" className="kf-btn" disabled={offset === 0}
