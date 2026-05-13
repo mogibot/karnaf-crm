@@ -1,9 +1,9 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import {
   fetchLeadDetail, postAdminAction, postSendReply, postQueueResolve,
-  type AdminAction, type CallOutcome,
+  type AdminAction, type CallOutcome, type LeadMetaUpdates,
 } from '@/lib/api';
 import { HeatBadge, OwnershipBadge, StatusBadge } from '@/components/Badge';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -81,6 +81,17 @@ export function LeadDetailPage() {
     | { action: AdminAction; note?: string; label: string; description: string; destructive: boolean }
     | null
   >(null);
+
+  const updateMeta = useMutation({
+    mutationFn: (updates: LeadMetaUpdates) =>
+      postAdminAction({ action: 'update_lead_meta', leadId, metaUpdates: updates }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['lead-detail', leadId] });
+      toast.success('עודכן');
+    },
+    onError: (err) => toast.error((err as Error).message),
+  });
+  const canEditMeta = auth.role === 'owner' || auth.role === 'admin' || auth.role === 'mia';
 
   if (detailQ.isLoading) return <p className="text-slate-500">{t('loading')}</p>;
   if (detailQ.error) return <p className="text-rose-600">{t('error_prefix')}: {(detailQ.error as Error).message}</p>;
@@ -202,10 +213,30 @@ export function LeadDetailPage() {
           <div className="kf-card p-4">
             <h2 className="font-semibold">הקשר ליד</h2>
             <dl className="mt-2 space-y-1 text-sm">
-              <Row k="מטרה" v={lead.goal_summary} />
-              <Row k="כאב מרכזי" v={lead.pain_point_summary} />
-              <Row k="חסם עיקרי" v={lead.main_blocker} />
-              <Row k="פעולה הבאה" v={lead.next_action_type} />
+              <EditableRow
+                k="מטרה"
+                v={lead.goal_summary}
+                editable={canEditMeta}
+                onSave={(next) => updateMeta.mutate({ goal_summary: next })}
+              />
+              <EditableRow
+                k="כאב מרכזי"
+                v={lead.pain_point_summary}
+                editable={canEditMeta}
+                onSave={(next) => updateMeta.mutate({ pain_point_summary: next })}
+              />
+              <EditableRow
+                k="חסם עיקרי"
+                v={lead.main_blocker}
+                editable={canEditMeta}
+                onSave={(next) => updateMeta.mutate({ main_blocker: next })}
+              />
+              <EditableRow
+                k="פעולה הבאה"
+                v={lead.next_action_type}
+                editable={canEditMeta}
+                onSave={(next) => updateMeta.mutate({ next_action_type: next })}
+              />
               <Row k="עד" v={lead.next_action_due_at ? formatDateTime(lead.next_action_due_at) : null} />
               <Row k="סטטוס תשלום" v={lead.payment_status} />
             </dl>
@@ -310,6 +341,83 @@ function Row({ k, v }: { k: string; v: string | null | undefined }) {
     <div className="grid grid-cols-3 gap-2">
       <dt className="col-span-1 text-slate-500">{k}</dt>
       <dd className="col-span-2 text-slate-800">{v || '—'}</dd>
+    </div>
+  );
+}
+
+function EditableRow({
+  k, v, editable, onSave,
+}: {
+  k: string;
+  v: string | null | undefined;
+  editable: boolean;
+  onSave: (next: string | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(v ?? '');
+
+  useEffect(() => {
+    if (!editing) setDraft(v ?? '');
+  }, [v, editing]);
+
+  if (!editable) return <Row k={k} v={v} />;
+
+  if (!editing) {
+    return (
+      <div className="grid grid-cols-3 items-center gap-2">
+        <dt className="col-span-1 text-slate-500">{k}</dt>
+        <dd className="col-span-2 flex items-center gap-2 text-slate-800">
+          <span className="min-w-0 flex-1 truncate">{v || '—'}</span>
+          <button
+            type="button"
+            className="text-xs text-brand-700 hover:underline"
+            onClick={() => setEditing(true)}
+          >
+            עריכה
+          </button>
+        </dd>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-3 items-center gap-2">
+      <dt className="col-span-1 text-slate-500">{k}</dt>
+      <dd className="col-span-2 flex items-center gap-2">
+        <input
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          className="kf-input text-sm"
+          maxLength={280}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setEditing(false);
+            if (e.key === 'Enter') {
+              const next = draft.trim();
+              onSave(next.length ? next : null);
+              setEditing(false);
+            }
+          }}
+        />
+        <button
+          type="button"
+          className="kf-btn kf-btn-primary text-xs"
+          onClick={() => {
+            const next = draft.trim();
+            onSave(next.length ? next : null);
+            setEditing(false);
+          }}
+        >
+          שמירה
+        </button>
+        <button
+          type="button"
+          className="kf-btn text-xs"
+          onClick={() => setEditing(false)}
+        >
+          ביטול
+        </button>
+      </dd>
     </div>
   );
 }

@@ -90,9 +90,17 @@ export async function fetchQueueList(params: { queueType?: string; status?: stri
 
 export type AdminAction =
   | 'assign_to_mia' | 'return_to_ai' | 'mark_phone_escalation'
-  | 'mark_dnc' | 'mark_lost' | 'mark_won' | 'resolve_queue' | 'log_phone_call';
+  | 'mark_dnc' | 'mark_lost' | 'mark_won' | 'resolve_queue' | 'log_phone_call'
+  | 'update_lead_meta';
 
 export type CallOutcome = 'connected' | 'no_answer' | 'voicemail' | 'declined' | 'callback_requested';
+
+export interface LeadMetaUpdates {
+  goal_summary?: string | null;
+  pain_point_summary?: string | null;
+  main_blocker?: string | null;
+  next_action_type?: string | null;
+}
 
 export async function postAdminAction(payload: {
   action: AdminAction;
@@ -102,6 +110,7 @@ export async function postAdminAction(payload: {
   note?: string | null;
   callOutcome?: CallOutcome;
   callDurationMinutes?: number;
+  metaUpdates?: LeadMetaUpdates;
 }) {
   return postJson<{ ok: true; action: string }>('/admin-actions', payload);
 }

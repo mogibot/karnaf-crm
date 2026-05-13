@@ -13,7 +13,8 @@ type ActionName =
   | 'mark_lost'
   | 'mark_won'
   | 'resolve_queue'
-  | 'log_phone_call';
+  | 'log_phone_call'
+  | 'update_lead_meta';
 
 // Per-action role allowlist. Sales reps can only log their own calls and
 // resolve queue items; lifecycle transitions (won/lost/dnc/handoff) and
@@ -27,6 +28,7 @@ const ACTION_ROLES: Record<ActionName, StaffRole[]> = {
   mark_won: ['owner', 'admin', 'mia'],
   resolve_queue: ['owner', 'admin', 'mia', 'sales_rep'],
   log_phone_call: ['owner', 'admin', 'mia', 'sales_rep'],
+  update_lead_meta: ['owner', 'admin', 'mia'],
 };
 
 interface ActionPayload {
@@ -37,6 +39,30 @@ interface ActionPayload {
   note?: string | null;
   callOutcome?: 'connected' | 'no_answer' | 'voicemail' | 'declined' | 'callback_requested';
   callDurationMinutes?: number;
+  metaUpdates?: {
+    goal_summary?: string | null;
+    pain_point_summary?: string | null;
+    main_blocker?: string | null;
+    next_action_type?: string | null;
+  };
+}
+
+const META_ALLOWED_FIELDS = new Set(['goal_summary', 'pain_point_summary', 'main_blocker', 'next_action_type']);
+const META_MAX_LENGTH = 280;
+
+function sanitiseMetaUpdates(input: ActionPayload['metaUpdates']): Record<string, string | null> | null {
+  if (!input || typeof input !== 'object') return null;
+  const out: Record<string, string | null> = {};
+  for (const [k, v] of Object.entries(input)) {
+    if (!META_ALLOWED_FIELDS.has(k)) continue;
+    if (v === null) {
+      out[k] = null;
+    } else if (typeof v === 'string') {
+      const trimmed = v.trim().slice(0, META_MAX_LENGTH);
+      out[k] = trimmed.length === 0 ? null : trimmed;
+    }
+  }
+  return Object.keys(out).length ? out : null;
 }
 
 Deno.serve(async (req) => {
@@ -136,6 +162,21 @@ Deno.serve(async (req) => {
       await updateLeadFields(supabase, leadId, { won_at: ts });
       await transitionLeadStatus(supabase, leadId, 'won', staff.role, 'manual_mark_won');
       await logLeadEvent(supabase, leadId, 'manual_mark_won', staff.role, meta, conversationId ?? undefined, staff.userId);
+      break;
+    }
+    case 'update_lead_meta': {
+      const sanitised = sanitiseMetaUpdates(body.metaUpdates);
+      if (!sanitised) return jsonResponse(req, { error: 'No meta fields to update' }, 400);
+      await updateLeadFields(supabase, leadId, sanitised);
+      await logLeadEvent(
+        supabase,
+        leadId,
+        'lead_meta_updated',
+        staff.role,
+        { ...meta, updates: sanitised },
+        conversationId ?? undefined,
+        staff.userId,
+      );
       break;
     }
     case 'log_phone_call': {
