@@ -6,6 +6,8 @@ import {
   type AdminAction, type CallOutcome,
 } from '@/lib/api';
 import { HeatBadge, OwnershipBadge, StatusBadge } from '@/components/Badge';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { t } from '@/lib/i18n';
 import { QUEUE_LABELS, formatDateTime, formatRelative } from '@/lib/format';
 import type { MessageRow } from '@/lib/types';
 import { useAuth } from '@/auth/auth-context';
@@ -75,8 +77,13 @@ export function LeadDetailPage() {
     onError: (err) => toast.error((err as Error).message),
   });
 
-  if (detailQ.isLoading) return <p className="text-slate-500">טוען...</p>;
-  if (detailQ.error) return <p className="text-rose-600">שגיאה: {(detailQ.error as Error).message}</p>;
+  const [pendingAction, setPendingAction] = useState<
+    | { action: AdminAction; note?: string; label: string; description: string; destructive: boolean }
+    | null
+  >(null);
+
+  if (detailQ.isLoading) return <p className="text-slate-500">{t('loading')}</p>;
+  if (detailQ.error) return <p className="text-rose-600">{t('error_prefix')}: {(detailQ.error as Error).message}</p>;
   if (!detailQ.data) return null;
 
   const { lead, messages, queueItems, tasks, events } = detailQ.data;
@@ -120,15 +127,43 @@ export function LeadDetailPage() {
               </button>
             </ActionGroup>
             <ActionGroup label="סטטוס">
-              <button type="button" className="kf-btn kf-btn-primary" onClick={() => action.mutate({ action: 'mark_won', label: 'נסגר ברכישה' })}>
+              <button
+                type="button"
+                className="kf-btn kf-btn-primary"
+                onClick={() => setPendingAction({
+                  action: 'mark_won',
+                  label: 'נסגר ברכישה',
+                  description: 'לסמן את הליד כסגירה ולהפעיל את תהליך האונבורדינג?',
+                  destructive: false,
+                })}
+              >
                 סימון כסגירה
               </button>
-              <button type="button" className="kf-btn" onClick={() => action.mutate({ action: 'mark_lost', note: 'manual_close', label: 'סומן כאבוד' })}>
+              <button
+                type="button"
+                className="kf-btn"
+                onClick={() => setPendingAction({
+                  action: 'mark_lost',
+                  note: 'manual_close',
+                  label: 'סומן כאבוד',
+                  description: 'לסמן את הליד כאבוד. פעולה זו לא ניתנת לשחזור.',
+                  destructive: true,
+                })}
+              >
                 סימון כאבוד
               </button>
             </ActionGroup>
             <ActionGroup label="הסרה">
-              <button type="button" className="kf-btn kf-btn-danger" onClick={() => action.mutate({ action: 'mark_dnc', label: 'סומן כ-DNC' })}>
+              <button
+                type="button"
+                className="kf-btn kf-btn-danger"
+                onClick={() => setPendingAction({
+                  action: 'mark_dnc',
+                  label: 'סומן כ-DNC',
+                  description: 'לסמן את הליד כ-Do Not Contact. הבוט יפסיק לפנות אליו ולא יישלחו עוד הודעות.',
+                  destructive: true,
+                })}
+              >
                 DNC
               </button>
             </ActionGroup>
@@ -244,6 +279,19 @@ export function LeadDetailPage() {
           </div>
         </aside>
       </section>
+
+      <ConfirmDialog
+        open={!!pendingAction}
+        title={pendingAction?.label ?? t('destructive_action_title')}
+        description={pendingAction?.description ?? t('destructive_action_warning')}
+        destructive={pendingAction?.destructive ?? false}
+        onCancel={() => setPendingAction(null)}
+        onConfirm={() => {
+          if (!pendingAction) return;
+          action.mutate({ action: pendingAction.action, note: pendingAction.note, label: pendingAction.label });
+          setPendingAction(null);
+        }}
+      />
     </div>
   );
 }

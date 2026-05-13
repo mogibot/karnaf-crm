@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthContext, type AuthState, type Role } from '@/auth/auth-context';
@@ -149,9 +149,11 @@ describe('LeadDetailPage', () => {
     expect(screen.getByRole('link', { name: '← חזרה לרשימה' })).toHaveAttribute('href', '/leads');
   });
 
-  it('invokes mark_won when the close button is clicked', async () => {
+  it('invokes mark_won after confirming the action dialog', async () => {
     renderDetail();
     fireEvent.click(await screen.findByRole('button', { name: 'סימון כסגירה' }));
+    const dialog = await screen.findByRole('alertdialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'אישור' }));
     await waitFor(() => {
       expect(postAdminAction).toHaveBeenCalledWith(expect.objectContaining({
         action: 'mark_won', leadId: 'lead-1',
@@ -159,14 +161,24 @@ describe('LeadDetailPage', () => {
     });
   });
 
-  it('invokes mark_lost with a manual_close note', async () => {
+  it('invokes mark_lost with manual_close note after confirming dialog', async () => {
     renderDetail();
     fireEvent.click(await screen.findByRole('button', { name: 'סימון כאבוד' }));
+    const dialog = await screen.findByRole('alertdialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'אישור' }));
     await waitFor(() => {
       expect(postAdminAction).toHaveBeenCalledWith(expect.objectContaining({
         action: 'mark_lost', leadId: 'lead-1', note: 'manual_close',
       }));
     });
+  });
+
+  it('cancel button on the confirm dialog does not fire the action', async () => {
+    renderDetail();
+    fireEvent.click(await screen.findByRole('button', { name: 'DNC' }));
+    const dialog = await screen.findByRole('alertdialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ביטול' }));
+    expect(postAdminAction).not.toHaveBeenCalled();
   });
 
   it('sends a manual reply with trimmed text and clears the textarea afterward', async () => {
