@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { reportError } from '@/lib/observability';
+import { t } from '@/lib/i18n';
 
 interface State { error: Error | null; }
 
@@ -18,10 +19,10 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
       return (
         <div className="grid min-h-screen place-items-center p-6">
           <div className="kf-card max-w-lg p-6">
-            <h1 className="text-lg font-semibold text-rose-700">שגיאה בלתי צפויה</h1>
+            <h1 className="text-lg font-semibold text-rose-700">{t('unexpected_error')}</h1>
             <p className="mt-2 text-sm text-slate-600">{this.state.error.message}</p>
             <button type="button" className="kf-btn kf-btn-primary mt-4" onClick={() => location.reload()}>
-              טעינה מחדש
+              {t('reload')}
             </button>
           </div>
         </div>

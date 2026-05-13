@@ -69,9 +69,9 @@ export function DashboardPage() {
                     <strong>{QUEUE_LABELS[q.queue_type] ?? q.queue_type}</strong>
                     <span className="text-slate-500"> · {q.leads?.full_name ?? '—'}</span>
                   </Link>
-                  <span className="inline-flex items-center gap-1 text-xs text-slate-500" title={`עדיפות ${q.priority_level}`}>
+                  <span className="inline-flex items-center gap-1 text-xs text-slate-500" title={`${t('priority')} ${q.priority_level}`}>
                     <PriorityDot priority={q.priority_level} />
-                    עדיפות {q.priority_level}
+                    {t('priority')} {q.priority_level}
                   </span>
                 </li>
               ))}

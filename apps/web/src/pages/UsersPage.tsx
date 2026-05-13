@@ -8,6 +8,7 @@ import { useAuth } from '@/auth/auth-context';
 import { Navigate } from 'react-router-dom';
 import { useToast } from '@/components/Toast';
 import { useDocumentTitle } from '@/lib/useDocumentTitle';
+import { t } from '@/lib/i18n';
 
 const ROLES: Array<ProfileRow['role']> = ['owner', 'admin', 'mia', 'sales_rep', 'viewer'];
 
@@ -23,7 +24,7 @@ export function UsersPage() {
   const auth = useAuth();
   const qc = useQueryClient();
   const toast = useToast();
-  useDocumentTitle('ניהול משתמשים');
+  useDocumentTitle(t('user_management'));
   const list = useQuery({ queryKey: ['users'], queryFn: fetchUsersList });
 
   const create = useMutation({
@@ -49,7 +50,7 @@ export function UsersPage() {
 
   return (
     <div className="space-y-4">
-      <header><h1 className="text-2xl font-semibold tracking-tight">ניהול משתמשים</h1></header>
+      <header><h1 className="text-2xl font-semibold tracking-tight">{t('user_management')}</h1></header>
 
       <CreateUserForm
         onSubmit={(payload) => create.mutate(payload)}
@@ -72,7 +73,7 @@ export function UsersPage() {
           </thead>
           <tbody>
             {list.isLoading ? (
-              <tr><td colSpan={6} className="p-6 text-center text-slate-500">טוען...</td></tr>
+              <tr><td colSpan={6} className="p-6 text-center text-slate-500">{t('loading')}</td></tr>
             ) : list.data && list.data.length > 0 ? (
               list.data.map((u) => (
                 <tr key={u.id}>
