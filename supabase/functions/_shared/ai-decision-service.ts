@@ -5,6 +5,7 @@ import { selectPlaybook } from './playbooks.ts';
 import { validateAiDecision } from './ai-validation.ts';
 import { isOpen, recordFailure, recordSuccess } from './circuit-breaker.ts';
 import { pickPromptVariant, type PromptVariant } from './prompt-variant.ts';
+import { resolveMaxReplyChars } from './reply-length.ts';
 import { env } from './env.ts';
 import { log } from './logger.ts';
 
@@ -34,26 +35,35 @@ export async function runAiDecision(
     paymentStatus: context.lead.paymentStatus,
     hoursSinceLastInbound: hoursSinceInbound,
     freeAdviceCount: context.freeAdviceCount,
+    inferredIntent: context.intentContext?.intent,
+    intentConfidence: context.intentContext?.confidence,
   });
 
   // A/B variant: weighted random pick from active rows for this playbook.
   // Falls back to the static prompt_version configured in crm_config.
   let variant: PromptVariant | null = null;
   try {
-    variant = await pickPromptVariant(supabase, playbook.name);
+    variant = await pickPromptVariant(supabase, playbook.name, {
+      heat: context.lead.heat,
+      source: context.lead.source,
+      status: context.lead.status,
+    });
   } catch (err) {
     log.warn('variant_lookup_failed', { fn: 'runAiDecision', correlationId, err: String(err) });
   }
   const promptVersion = variant?.version ?? context.runtimeConfig.ai.promptVersion;
   const overrides = variant?.prompt_overrides ?? {};
 
+  const maxReplyChars = resolveMaxReplyChars(context.lead.heat, context.runtimeConfig.ai.maxReplyChars);
+
   const validateInput = {
     currentStatus: context.lead.status,
     forbiddenClaims: context.runtimeConfig.forbiddenClaims,
     playbook,
-    maxReplyChars: context.runtimeConfig.ai.maxReplyChars,
+    maxReplyChars,
     isDoNotContact: context.lead.doNotContact,
     isRemovedByRequest: context.lead.removedByRequest,
+    recentAiQuestions: context.recentAiQuestions ?? [],
   } as const;
 
   const blockWith = (status: string, raw: unknown) => {

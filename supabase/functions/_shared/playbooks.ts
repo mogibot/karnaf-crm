@@ -134,16 +134,36 @@ export interface PlaybookSelectionInput {
   paymentStatus: string | null;
   hoursSinceLastInbound: number | null;
   freeAdviceCount: number;
+  inferredIntent?:
+    | 'question'
+    | 'objection'
+    | 'buy_signal'
+    | 'escalation_request'
+    | 'chit_chat'
+    | 'dnc_request'
+    | 'unclear';
+  intentConfidence?: 'high' | 'medium' | 'low';
 }
 
 export function selectPlaybook(input: PlaybookSelectionInput): Playbook {
   const lower = input.inboundText.toLowerCase();
   const has = (words: string[]) => words.some((w) => lower.includes(w.toLowerCase()));
 
+  // Intent-first routing: trust the classifier when it's confident enough.
+  // High confidence wins over keyword-only matching; medium confidence is
+  // only used when the keyword path would not have routed anywhere stronger.
+  const intent = input.inferredIntent;
+  const conf = input.intentConfidence ?? 'low';
+  if (intent === 'dnc_request' && conf !== 'low') return byName('opt_out');
+  if (intent === 'escalation_request' && conf !== 'low') return byName('phone_request');
+  if (intent === 'buy_signal' && conf === 'high') {
+    return byName(input.leadStatus === 'qualified' ? 'checkout_push' : 'qualification');
+  }
+
   if (has(stopWords)) return byName('opt_out');
   if (has(phoneWords)) return byName('phone_request');
   if (input.leadStatus === 'payment_pending') return byName('payment_pending_rescue');
-  if (has(priceWords)) return byName('price_objection');
+  if (has(priceWords) || intent === 'objection') return byName('price_objection');
   if (input.freeAdviceCount >= 3) return byName('free_advice_boundary');
 
   if (input.leadStatus === 'qualified') return byName('checkout_push');

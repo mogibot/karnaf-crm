@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { condense, firstSentence, synthesise } from './transcript-summary';
+import {
+  condense,
+  firstSentence,
+  synthesise,
+  extractStructured,
+  formatStructuredSummary,
+} from './transcript-summary';
 
 describe('firstSentence', () => {
   it('returns the original string when no sentence break is present', () => {
@@ -75,5 +81,94 @@ describe('synthesise', () => {
 
   it('handles all-empty input', () => {
     expect(synthesise([])).toBe('');
+  });
+});
+
+describe('extractStructured', () => {
+  it('detects price objection from lead message', () => {
+    const out = extractStructured([
+      { sender_type: 'lead', direction: 'inbound', content_text: 'המחיר נשמע יקר לי', created_at: null },
+    ]);
+    expect(out.objections.price.length).toBe(1);
+    expect(out.objections.time.length).toBe(0);
+  });
+
+  it('detects partner-involved objection', () => {
+    const out = extractStructured([
+      { sender_type: 'lead', direction: 'inbound', content_text: 'אני צריך לדבר עם בן זוג שלי קודם', created_at: null },
+    ]);
+    expect(out.objections.partner.length).toBe(1);
+  });
+
+  it('detects commitment from AI message', () => {
+    const out = extractStructured([
+      { sender_type: 'ai', direction: 'outbound', content_text: 'אשלח לך עכשיו את המסמך', created_at: null },
+    ]);
+    expect(out.commitments.length).toBe(1);
+  });
+
+  it('separates lead/ai/human recent snippets', () => {
+    const out = extractStructured([
+      { sender_type: 'lead', direction: 'inbound', content_text: 'היי', created_at: null },
+      { sender_type: 'ai', direction: 'outbound', content_text: 'שלום', created_at: null },
+      { sender_type: 'mia', direction: 'outbound', content_text: 'בוקר טוב', created_at: null },
+    ]);
+    expect(out.recentLeadSnippets).toEqual(['היי']);
+    expect(out.recentAiSnippets).toEqual(['שלום']);
+    expect(out.recentHumanSnippets).toEqual(['בוקר טוב']);
+  });
+
+  it('detects pain points and goals together', () => {
+    const out = extractStructured([
+      { sender_type: 'lead', direction: 'inbound', content_text: 'אני רוצה לקנות דירה ראשונה', created_at: null },
+      { sender_type: 'lead', direction: 'inbound', content_text: 'אבל קשה לי להבין מאיפה מתחילים', created_at: null },
+    ]);
+    expect(out.goals.length).toBeGreaterThanOrEqual(1);
+    expect(out.painPoints.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('caps per-bucket entries', () => {
+    const rows = Array.from({ length: 20 }, (_, i) => ({
+      sender_type: 'lead' as const,
+      direction: 'inbound' as const,
+      content_text: `המחיר ${i} גבוה מדי`,
+      created_at: null as string | null,
+    }));
+    const out = extractStructured(rows);
+    expect(out.objections.price.length).toBeLessThanOrEqual(5);
+  });
+});
+
+describe('formatStructuredSummary', () => {
+  it('produces multi-line summary with category prefixes', () => {
+    const text = formatStructuredSummary({
+      painPoints: ['קשה לי'],
+      goals: ['רוצה דירה'],
+      objections: { price: ['יקר'], time: [], partner: [], deferred: [] },
+      commitments: ['אשלח חומר'],
+      recentLeadSnippets: ['היי'],
+      recentAiSnippets: ['שלום'],
+      recentHumanSnippets: [],
+    });
+    expect(text).toMatch(/GOALS:/);
+    expect(text).toMatch(/PAIN_POINTS:/);
+    expect(text).toMatch(/OBJECTIONS:.*price=/);
+    expect(text).toMatch(/COMMITMENTS:/);
+    expect(text).toMatch(/^LEAD: היי$/m);
+    expect(text).toMatch(/^AI: שלום$/m);
+  });
+
+  it('emits empty string when nothing populated', () => {
+    expect(
+      formatStructuredSummary({
+        painPoints: [],
+        goals: [],
+        objections: { price: [], time: [], partner: [], deferred: [] },
+        commitments: [],
+        recentLeadSnippets: [],
+        recentAiSnippets: [],
+        recentHumanSnippets: [],
+      }),
+    ).toBe('');
   });
 });

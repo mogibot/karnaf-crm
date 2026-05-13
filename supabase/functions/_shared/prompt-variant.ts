@@ -20,11 +20,23 @@ export interface PromptOverrides {
   [key: string]: unknown;
 }
 
+export interface LeadSegment {
+  heat?: string | null;
+  source?: string | null;
+  status?: string | null;
+}
+
 export async function pickPromptVariant(
   supabase: SupabaseClient,
   playbookName: string,
+  segment: LeadSegment = {},
 ): Promise<PromptVariant | null> {
-  const { data, error } = await supabase.rpc('pick_prompt_variant', { p_playbook: playbookName });
+  const { data, error } = await supabase.rpc('pick_prompt_variant', {
+    p_playbook: playbookName,
+    p_lead_heat: segment.heat ?? null,
+    p_lead_source: segment.source ?? null,
+    p_lead_status: segment.status ?? null,
+  });
   if (error || !data) return null;
   if (Array.isArray(data) && data.length > 0) return data[0] as PromptVariant;
   if (!Array.isArray(data) && typeof data === 'object') return data as PromptVariant;

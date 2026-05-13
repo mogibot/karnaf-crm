@@ -22,6 +22,7 @@ interface CreateInput {
   prompt_overrides?: Record<string, unknown>;
   is_active?: boolean;
   notes?: string | null;
+  lead_segment_filter?: SegmentFilter;
 }
 interface UpdateInput {
   action: 'update';
@@ -30,6 +31,28 @@ interface UpdateInput {
   prompt_overrides?: Record<string, unknown>;
   is_active?: boolean;
   notes?: string | null;
+  lead_segment_filter?: SegmentFilter;
+}
+
+interface SegmentFilter {
+  heat?: string[];
+  source?: string[];
+  status?: string[];
+}
+
+function sanitiseFilter(input: unknown): SegmentFilter | undefined {
+  if (!input || typeof input !== 'object') return undefined;
+  const out: SegmentFilter = {};
+  const allowedKeys: (keyof SegmentFilter)[] = ['heat', 'source', 'status'];
+  const src = input as Record<string, unknown>;
+  for (const k of allowedKeys) {
+    const v = src[k];
+    if (Array.isArray(v)) {
+      const cleaned = v.filter((x): x is string => typeof x === 'string' && x.length > 0);
+      if (cleaned.length) out[k] = cleaned;
+    }
+  }
+  return out;
 }
 interface DeleteInput {
   action: 'delete';
@@ -61,7 +84,7 @@ Deno.serve(async (req) => {
   if (req.method === 'GET') {
     const { data, error } = await supabase
       .from('prompt_variants')
-      .select('id, playbook_name, version, weight, prompt_overrides, is_active, notes, created_at, updated_at')
+      .select('id, playbook_name, version, weight, prompt_overrides, is_active, notes, lead_segment_filter, created_at, updated_at')
       .order('playbook_name')
       .order('version');
     if (error) return jsonResponse(req, { error: error.message }, 500);
@@ -86,12 +109,13 @@ Deno.serve(async (req) => {
       prompt_overrides: body.prompt_overrides ?? {},
       is_active: body.is_active ?? true,
       notes: body.notes ?? null,
+      lead_segment_filter: sanitiseFilter(body.lead_segment_filter) ?? {},
       created_by_user_id: staff.userId,
     };
     const { data, error } = await supabase
       .from('prompt_variants')
       .insert(insert)
-      .select('id, playbook_name, version, weight, prompt_overrides, is_active, notes, created_at, updated_at')
+      .select('id, playbook_name, version, weight, prompt_overrides, is_active, notes, lead_segment_filter, created_at, updated_at')
       .single();
     if (error) {
       if (error.message.includes('duplicate key value')) {
@@ -110,6 +134,9 @@ Deno.serve(async (req) => {
     if (body.prompt_overrides !== undefined) updates.prompt_overrides = body.prompt_overrides;
     if (body.is_active !== undefined) updates.is_active = body.is_active;
     if (body.notes !== undefined) updates.notes = body.notes;
+    if (body.lead_segment_filter !== undefined) {
+      updates.lead_segment_filter = sanitiseFilter(body.lead_segment_filter) ?? {};
+    }
     if (Object.keys(updates).length === 0) {
       return jsonResponse(req, { error: 'No fields to update' }, 400);
     }
@@ -117,7 +144,7 @@ Deno.serve(async (req) => {
       .from('prompt_variants')
       .update(updates)
       .eq('id', body.id)
-      .select('id, playbook_name, version, weight, prompt_overrides, is_active, notes, created_at, updated_at')
+      .select('id, playbook_name, version, weight, prompt_overrides, is_active, notes, lead_segment_filter, created_at, updated_at')
       .single();
     if (error) return jsonResponse(req, { error: error.message }, 500);
     log.info('prompt_variant_updated', { fn: 'prompt-variants', correlationId, by: staff.userId, id: body.id });

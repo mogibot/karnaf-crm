@@ -175,3 +175,63 @@ describe('PLAYBOOKS catalog integrity', () => {
     expect(phone.allowedNextStatuses).toEqual(['human_handoff']);
   });
 });
+
+describe('selectPlaybook intent routing', () => {
+  it('high-confidence dnc_request intent routes to opt_out even without stopWords', () => {
+    const r = selectPlaybook(
+      baseInput({
+        inboundText: 'אל תשלחו לי יותר הודעות',
+        inferredIntent: 'dnc_request',
+        intentConfidence: 'high',
+      }),
+    );
+    expect(r.name).toBe('opt_out');
+  });
+
+  it('high-confidence escalation_request intent routes to phone_request', () => {
+    const r = selectPlaybook(
+      baseInput({
+        inboundText: 'אני רוצה לדבר עם אדם אמיתי',
+        inferredIntent: 'escalation_request',
+        intentConfidence: 'high',
+      }),
+    );
+    expect(r.name).toBe('phone_request');
+  });
+
+  it('high-confidence buy_signal on qualified lead routes to checkout_push', () => {
+    const r = selectPlaybook(
+      baseInput({
+        inboundText: 'מוכן להירשם, איך משלמים?',
+        leadStatus: 'qualified',
+        inferredIntent: 'buy_signal',
+        intentConfidence: 'high',
+      }),
+    );
+    expect(r.name).toBe('checkout_push');
+  });
+
+  it('objection intent routes to price_objection even without price keyword', () => {
+    const r = selectPlaybook(
+      baseInput({
+        inboundText: 'לא בטוח שזה מתאים לי כרגע',
+        leadStatus: 'responded',
+        inferredIntent: 'objection',
+        intentConfidence: 'medium',
+      }),
+    );
+    expect(r.name).toBe('price_objection');
+  });
+
+  it('low-confidence intent does NOT override keyword logic', () => {
+    const r = selectPlaybook(
+      baseInput({
+        inboundText: 'תודה',
+        leadStatus: 'new',
+        inferredIntent: 'dnc_request',
+        intentConfidence: 'low',
+      }),
+    );
+    expect(r.name).not.toBe('opt_out');
+  });
+});
