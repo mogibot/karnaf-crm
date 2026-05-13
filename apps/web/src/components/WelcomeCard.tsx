@@ -82,6 +82,8 @@ export function WelcomeCard({ role, userEmail }: { role: Role | null; userEmail:
       </div>
       <p className="mt-3 text-xs text-slate-500">
         מדריך מלא בעברית: <code className="rounded bg-white px-1.5 py-0.5">docs/operator-guide.md</code>
+        {' · '}
+        <Link to="/help/permissions" className="text-brand-700 hover:underline">מטריצת הרשאות</Link>
       </p>
     </section>
   );
