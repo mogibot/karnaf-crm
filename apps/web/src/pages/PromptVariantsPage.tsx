@@ -89,7 +89,7 @@ function PlaybookSection({
 }: {
   playbook: PlaybookName;
   variants: PromptVariantRow[];
-  onUpdate: (input: { id: string; weight?: number; is_active?: boolean; prompt_overrides?: PromptVariantRow['prompt_overrides']; notes?: string | null }) => void;
+  onUpdate: (input: { id: string; weight?: number; is_active?: boolean; prompt_overrides?: PromptVariantRow['prompt_overrides']; notes?: string | null; lead_segment_filter?: PromptVariantRow['lead_segment_filter'] }) => void;
   onDelete: (id: string) => void;
   updating: boolean;
   deleting: boolean;
@@ -129,7 +129,7 @@ function VariantRow({
 }: {
   variant: PromptVariantRow;
   activeShare: number;
-  onUpdate: (input: { id: string; weight?: number; is_active?: boolean; prompt_overrides?: PromptVariantRow['prompt_overrides']; notes?: string | null }) => void;
+  onUpdate: (input: { id: string; weight?: number; is_active?: boolean; prompt_overrides?: PromptVariantRow['prompt_overrides']; notes?: string | null; lead_segment_filter?: PromptVariantRow['lead_segment_filter'] }) => void;
   onDelete: (id: string) => void;
   updating: boolean;
   deleting: boolean;
@@ -138,9 +138,24 @@ function VariantRow({
   const [objective, setObjective] = useState(variant.prompt_overrides.objective ?? '');
   const [guidanceText, setGuidanceText] = useState((variant.prompt_overrides.guidance ?? []).join('\n'));
   const [notes, setNotes] = useState(variant.notes ?? '');
+  const [segmentHeat, setSegmentHeat] = useState((variant.lead_segment_filter?.heat ?? []).join(','));
+  const [segmentSource, setSegmentSource] = useState((variant.lead_segment_filter?.source ?? []).join(','));
+  const [segmentStatus, setSegmentStatus] = useState((variant.lead_segment_filter?.status ?? []).join(','));
+
+  function parseCsv(s: string): string[] | undefined {
+    const parts = s.split(',').map((p) => p.trim()).filter(Boolean);
+    return parts.length ? parts : undefined;
+  }
 
   function saveOverrides() {
     const guidance = guidanceText.split('\n').map((l) => l.trim()).filter(Boolean);
+    const segmentFilter: PromptVariantRow['lead_segment_filter'] = {};
+    const heatParts = parseCsv(segmentHeat);
+    const sourceParts = parseCsv(segmentSource);
+    const statusParts = parseCsv(segmentStatus);
+    if (heatParts) segmentFilter.heat = heatParts;
+    if (sourceParts) segmentFilter.source = sourceParts;
+    if (statusParts) segmentFilter.status = statusParts;
     onUpdate({
       id: variant.id,
       prompt_overrides: {
@@ -149,6 +164,7 @@ function VariantRow({
         guidance: guidance.length > 0 ? guidance : undefined,
       },
       notes: notes.trim() || null,
+      lead_segment_filter: segmentFilter,
     });
   }
 
@@ -239,6 +255,39 @@ function VariantRow({
               onChange={(e) => setNotes(e.target.value)}
             />
           </label>
+          <fieldset className="rounded-lg border border-slate-200 bg-slate-50/50 p-3">
+            <legend className="px-1 text-xs font-semibold text-slate-600">סינון לפי סגמנט (אופציונלי)</legend>
+            <p className="text-xs text-slate-500">השאר ריק כדי להפעיל על כל הלידים. ערכים מופרדים בפסיק.</p>
+            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <label className="text-xs text-slate-700">
+                heat
+                <input
+                  className="kf-input mt-1"
+                  placeholder="hot,warm"
+                  value={segmentHeat}
+                  onChange={(e) => setSegmentHeat(e.target.value)}
+                />
+              </label>
+              <label className="text-xs text-slate-700">
+                source
+                <input
+                  className="kf-input mt-1"
+                  placeholder="webinar,instagram_dm"
+                  value={segmentSource}
+                  onChange={(e) => setSegmentSource(e.target.value)}
+                />
+              </label>
+              <label className="text-xs text-slate-700">
+                status
+                <input
+                  className="kf-input mt-1"
+                  placeholder="responded,qualified"
+                  value={segmentStatus}
+                  onChange={(e) => setSegmentStatus(e.target.value)}
+                />
+              </label>
+            </div>
+          </fieldset>
           <div className="flex justify-end">
             <button type="button" className="kf-btn kf-btn-primary" onClick={saveOverrides} disabled={updating}>
               שמור שינויים

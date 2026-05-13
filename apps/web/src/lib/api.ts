@@ -229,6 +229,12 @@ export type PlaybookName =
   | 'price_objection' | 'free_advice_boundary' | 'checkout_push'
   | 'payment_pending_rescue' | 'phone_request' | 'opt_out';
 
+export interface LeadSegmentFilter {
+  heat?: string[];
+  source?: string[];
+  status?: string[];
+}
+
 export interface PromptVariantRow {
   id: string;
   playbook_name: PlaybookName;
@@ -237,6 +243,7 @@ export interface PromptVariantRow {
   prompt_overrides: { objective?: string; guidance?: string[]; [key: string]: unknown };
   is_active: boolean;
   notes: string | null;
+  lead_segment_filter?: LeadSegmentFilter;
   created_at: string;
   updated_at: string;
 }
@@ -257,6 +264,7 @@ export async function postCreatePromptVariant(payload: {
   prompt_overrides?: PromptVariantRow['prompt_overrides'];
   is_active?: boolean;
   notes?: string | null;
+  lead_segment_filter?: LeadSegmentFilter;
 }) {
   return postJson<{ ok: true; variant: PromptVariantRow }>('/prompt-variants', { action: 'create', ...payload });
 }
@@ -267,6 +275,7 @@ export async function postUpdatePromptVariant(payload: {
   prompt_overrides?: PromptVariantRow['prompt_overrides'];
   is_active?: boolean;
   notes?: string | null;
+  lead_segment_filter?: LeadSegmentFilter;
 }) {
   return postJson<{ ok: true; variant: PromptVariantRow }>('/prompt-variants', { action: 'update', ...payload });
 }
