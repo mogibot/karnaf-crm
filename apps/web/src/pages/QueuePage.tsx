@@ -177,8 +177,12 @@ function PriorityPill({ priority }: { priority: number }) {
     priority <= 1 ? 'bg-rose-50 text-rose-700' :
     priority <= 2 ? 'bg-amber-50 text-amber-700' :
     'bg-slate-100 text-slate-600';
+  const severityLabel = priority <= 1 ? t('priority') + ' גבוהה' : priority <= 2 ? t('priority') + ' בינונית' : t('priority') + ' נמוכה';
   return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium tabular-nums ${tone}`}>
+    <span
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium tabular-nums ${tone}`}
+      aria-label={`${severityLabel} (${priority})`}
+    >
       {priority}
     </span>
   );
