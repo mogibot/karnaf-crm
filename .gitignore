@@ -18,3 +18,4 @@ test-results/
 .claude/
 .playwright-mcp/
 login-prod.png
+prod-after-deploy.png

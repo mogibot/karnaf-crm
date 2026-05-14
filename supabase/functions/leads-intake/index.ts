@@ -4,6 +4,11 @@ import { ensurePendingQueueItem } from '../_shared/queue-service.ts';
 import { logLeadEvent, upsertLead } from '../_shared/lead-service.ts';
 import { normalizeIsraeliPhone } from '../_shared/phone.ts';
 import { verifyHmacHeader } from '../_shared/webhook-signature.ts';
+import {
+  getWebhookIdempotencyResponse,
+  hashBody,
+  storeWebhookIdempotencyResponse,
+} from '../_shared/idempotency.ts';
 import { env } from '../_shared/env.ts';
 import { correlationFromRequest, log } from '../_shared/logger.ts';
 import { getRuntimeConfig } from '../_shared/config-service.ts';
@@ -23,7 +28,10 @@ Deno.serve(async (req) => {
   const rawBody = await req.text();
   const secret = env.intakeWebhookSecret();
   if (secret) {
-    const valid = await verifyHmacHeader(req, rawBody, secret, 'x-karnaf-signature');
+    // Accept both x-karnaf-signature (canonical) and x-intake-signature
+    // (legacy, still in the integration test harness and some pre-prod
+    // callers). Drop the legacy name after the next deploy cycle.
+    const valid = await verifyHmacHeader(req, rawBody, secret, ['x-karnaf-signature', 'x-intake-signature']);
     if (!valid) {
       log.warn('intake_signature_invalid', { fn: 'leads-intake', correlationId });
       return jsonResponse(req, { error: 'Invalid signature' }, 401);
@@ -43,6 +51,19 @@ Deno.serve(async (req) => {
   });
   if (!allowed) {
     return jsonResponse(req, { error: 'Rate limit exceeded' }, 429);
+  }
+
+  // Request-level idempotency. Prefer an explicit header (Zapier / Make
+  // can be configured to send one) and fall back to a SHA-256 of the
+  // body so plain retries within the TTL still de-dup.
+  const explicitIdempotencyKey = req.headers.get('idempotency-key')?.trim() || null;
+  const idempotencyKey = `intake:${explicitIdempotencyKey ?? (await hashBody(rawBody))}`;
+  const cached = await getWebhookIdempotencyResponse(supabase, idempotencyKey);
+  if (cached) {
+    log.info('intake_idempotency_hit', {
+      fn: 'leads-intake', correlationId, key: idempotencyKey, explicit: !!explicitIdempotencyKey,
+    });
+    return jsonResponse(req, { ...cached, idempotent: true });
   }
 
   const phoneRaw = (payload.phone ?? payload.mobile) as string | undefined;
@@ -102,5 +123,13 @@ Deno.serve(async (req) => {
   });
 
   log.info('lead_intake_accepted', { fn: 'leads-intake', correlationId, leadId: lead.id, source });
-  return jsonResponse(req, { ok: true, leadId: lead.id, correlationId });
+  const response = { ok: true as const, leadId: lead.id, correlationId };
+  // Fire-and-forget the idempotency write; failure here doesn't change
+  // the caller-visible behaviour (worst case: duplicate work on retry).
+  storeWebhookIdempotencyResponse(supabase, idempotencyKey, 'intake', response).catch(
+    (err) => log.error('intake_idempotency_store_failed', {
+      fn: 'leads-intake', correlationId, err: String(err),
+    }),
+  );
+  return jsonResponse(req, response);
 });
