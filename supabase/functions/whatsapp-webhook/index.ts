@@ -121,25 +121,33 @@ Deno.serve(async (req) => {
     );
   }
 
-  await logLeadEvent(supabase, lead.id, 'inbound_message_received', 'provider', {
+  const eventRow = await logLeadEvent(supabase, lead.id, 'inbound_message_received', 'provider', {
     provider: normalized.provider,
     provider_message_id: normalized.providerMessageId,
     correlation_id: correlationId,
   }, conversation.id);
 
-  // Fire-and-forget the orchestrator. We don't await its work to keep the
-  // webhook latency low; the Supabase edge runtime guarantees the request
-  // completes before the function shuts down.
-  const orchestrateUrl = `${env.supabaseUrl()}/functions/v1/orchestrate-message`;
-  fetch(orchestrateUrl, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${env.serviceRoleKey()}`,
-      'Content-Type': 'application/json',
-      'x-correlation-id': correlationId,
+  // Enqueue an orchestrate-message dispatch instead of fire-and-forget so
+  // a crashed orchestrator or network glitch doesn't silently drop the
+  // reply. dispatch-outbound (run every minute by pg_cron) drains the
+  // queue with bounded retries + a dead-letter shelf.
+  const { error: dispatchErr } = await supabase.from('outbound_dispatch').insert({
+    lead_id: lead.id,
+    conversation_id: conversation.id,
+    source_event_id: eventRow?.id ?? null,
+    correlation_id: correlationId,
+    payload: {
+      provider: normalized.provider,
+      provider_message_id: normalized.providerMessageId,
     },
-    body: JSON.stringify({ leadId: lead.id, conversationId: conversation.id }),
-  }).catch((err) => log.error('orchestrate_dispatch_failed', { fn: 'whatsapp-webhook', correlationId, err: String(err) }));
+  });
+  // Unique on source_event_id means a retry of the same webhook will
+  // collide here — treat that as a no-op success.
+  if (dispatchErr && !String(dispatchErr.message || '').includes('duplicate key value')) {
+    log.error('dispatch_enqueue_failed', {
+      fn: 'whatsapp-webhook', correlationId, leadId: lead.id, err: String(dispatchErr),
+    });
+  }
 
   log.info('inbound_accepted', { fn: 'whatsapp-webhook', correlationId, leadId: lead.id, conversationId: conversation.id });
   return jsonResponse(req, { ok: true, leadId: lead.id, conversationId: conversation.id, correlationId });

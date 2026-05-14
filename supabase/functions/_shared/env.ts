@@ -31,6 +31,7 @@ export const env = {
   paymentWebhookSecret: () => optional('PAYMENT_WEBHOOK_SECRET'),
   intakeWebhookSecret: () => optional('INTAKE_WEBHOOK_SECRET'),
   slaWorkerSecret: () => optional('SLA_WORKER_SECRET'),
+  outboundDispatchSecret: () => optional('OUTBOUND_DISPATCH_SECRET'),
   openaiApiKey: () => optional('OPENAI_API_KEY'),
   openaiModel: () => optional('OPENAI_MODEL', 'gpt-4o-mini'),
 };
