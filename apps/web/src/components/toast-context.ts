@@ -2,10 +2,19 @@ import { createContext, useContext } from 'react';
 
 export type ToastTone = 'success' | 'error' | 'info';
 
+export interface ToastAction {
+  /** Button label (Hebrew). */
+  label: string;
+  /** Fired when the operator clicks the button. */
+  onClick: () => void;
+}
+
 export interface ToastInput {
   message: string;
   tone?: ToastTone;
   durationMs?: number;
+  /** Optional inline action button — used for Undo on destructive ops. */
+  action?: ToastAction;
 }
 
 export interface ToastApi {

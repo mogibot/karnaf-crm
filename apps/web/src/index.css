@@ -97,10 +97,24 @@ body {
   .kf-table-responsive tbody td[data-actions]::before { display: none; }
 }
 
-/* Larger tap targets on touch devices without over-padding desktop. */
+/* Larger tap targets on touch devices without over-padding desktop.
+   WCAG 2.5.5 (AAA) calls for 44×44 minimum. Coarse-pointer detection
+   is the cleanest way to apply this only where it matters. */
 @media (pointer: coarse) {
   .kf-btn { @apply min-h-11 px-4; }
   .kf-input { @apply py-2.5; }
+  /* Raw <button> + interactive controls anywhere on touch devices —
+     overrides per-component text-xs / h-8 / p-1 styles. Form-submit
+     buttons inside .kf-btn-* keep their own height (this is a min). */
+  button:not(.kf-btn-ghost), [role="button"], a.kf-link-action {
+    min-height: 2.75rem;
+  }
+  /* Tiny dismiss/close buttons (toast ×, modal close): keep visually
+     small but expand the hit area with padding. */
+  button[aria-label*="סגיר"], button[aria-label*="lose"], button[aria-label*="close"] {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
 }
 
 /* Skeletons + status utilities */

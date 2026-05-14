@@ -7,6 +7,11 @@ import { HeatBadge, OwnershipBadge } from '@/components/Badge';
 import { useToast } from '@/components/Toast';
 import { t } from '@/lib/i18n';
 import { useDocumentTitle } from '@/lib/useDocumentTitle';
+import { useRealtimeInvalidate } from '@/lib/useRealtimeInvalidate';
+import { useAuth } from '@/auth/auth-context';
+import { ensureNotificationPermission, useOperatorNotifications } from '@/lib/notifications';
+
+const REALTIME_QUEUE_KEYS: Array<readonly unknown[]> = [['queue']];
 
 const QUEUE_TYPES = [
   '', 'first_response_due', 'hot_lead', 'sla_risk', 'human_handoff',
@@ -24,7 +29,14 @@ export function QueuePage() {
   );
   const qc = useQueryClient();
   const toast = useToast();
+  const auth = useAuth();
   useDocumentTitle(t('queue_title'));
+
+  // P2.9 — Ask for browser-notification permission on first /queue visit
+  // (this is where Mia parks her day). Subsequent visits read the cached
+  // localStorage flag and don't re-prompt.
+  useEffect(() => { void ensureNotificationPermission(); }, []);
+  useOperatorNotifications(auth.user?.id ?? null);
 
   useEffect(() => {
     const next = new URLSearchParams();
@@ -36,7 +48,11 @@ export function QueuePage() {
   const q = useQuery({
     queryKey: ['queue', { type, status }],
     queryFn: () => fetchQueueList({ queueType: type || undefined, status }),
+    refetchInterval: 30_000,
   });
+
+  // Live updates as new queue items appear or get resolved.
+  useRealtimeInvalidate('work_queue', REALTIME_QUEUE_KEYS);
 
   const resolve = useMutation({
     mutationFn: (queueItemId: string) => postQueueResolve({ queueItemId }),

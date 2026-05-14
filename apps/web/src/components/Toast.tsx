@@ -9,8 +9,12 @@ import { ToastContext, type ToastApi, type ToastInput, type ToastTone } from './
 export { useToast } from './toast-context';
 export type { ToastApi, ToastInput, ToastTone } from './toast-context';
 
-interface ToastItem extends Required<ToastInput> {
+interface ToastItem {
   id: number;
+  message: ToastInput['message'];
+  tone: NonNullable<ToastInput['tone']>;
+  durationMs: NonNullable<ToastInput['durationMs']>;
+  action: ToastInput['action'];
 }
 
 export function ToastProvider({ children }: { children: ReactNode }) {
@@ -23,11 +27,15 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
   const push = useCallback((input: ToastInput) => {
     const id = ++idRef.current;
+    // When a toast carries an action button, default the lifetime to 10s
+    // (Undo window). Caller can still override via durationMs.
+    const defaultMs = input.action ? 10_000 : 4500;
     const item: ToastItem = {
       id,
       message: input.message,
       tone: input.tone ?? 'info',
-      durationMs: input.durationMs ?? 4500,
+      durationMs: input.durationMs ?? defaultMs,
+      action: input.action,
     };
     setItems((prev) => [...prev, item]);
     if (item.durationMs > 0) {
@@ -62,6 +70,15 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           >
             <ToneIcon tone={t.tone} />
             <div className="flex-1 leading-snug">{t.message}</div>
+            {t.action ? (
+              <button
+                type="button"
+                className="kf-btn kf-btn-ghost text-xs pointer-events-auto"
+                onClick={() => { t.action!.onClick(); dismiss(t.id); }}
+              >
+                {t.action.label}
+              </button>
+            ) : null}
             <button
               type="button" aria-label="סגירת התראה"
               className="text-slate-500 hover:text-slate-900"

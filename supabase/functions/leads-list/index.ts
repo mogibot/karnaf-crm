@@ -33,11 +33,21 @@ Deno.serve(async (req) => {
   const limit = Math.min(Number(url.searchParams.get('limit') ?? 50), 200);
   const offset = Math.max(0, Number(url.searchParams.get('offset') ?? 0));
 
+  // Allowed sort columns — whitelist so a malformed `sortBy=...` can't
+  // tunnel into PostgREST. `updated_at desc` stays as the default.
+  const SORTABLE_COLUMNS = new Set([
+    'updated_at', 'created_at', 'lead_score', 'lead_status', 'lead_heat',
+    'last_inbound_at', 'last_outbound_at', 'last_message_at', 'full_name',
+  ]);
+  const sortByRaw = url.searchParams.get('sortBy') ?? 'updated_at';
+  const sortBy = SORTABLE_COLUMNS.has(sortByRaw) ? sortByRaw : 'updated_at';
+  const sortDir = url.searchParams.get('sortDir') === 'asc' ? 'asc' : 'desc';
+
   const supabase = getServiceSupabase();
   let query = supabase
     .from('leads')
     .select('id, full_name, phone, email, source, lead_status, lead_heat, ownership_mode, lead_score, payment_status, last_message_at, last_inbound_at, last_outbound_at, do_not_contact, removed_by_request, updated_at, created_at', { count: 'exact' })
-    .order('updated_at', { ascending: false })
+    .order(sortBy, { ascending: sortDir === 'asc', nullsFirst: false })
     .range(offset, offset + limit - 1);
 
   if (status) query = query.eq('lead_status', status);

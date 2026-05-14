@@ -125,10 +125,45 @@ Deno.serve(async (req) => {
     counters.dormant++;
   }
 
+  // ── Lifecycle dead-end sweeps (migrations 032) ─────────────────────────
+  // The sla-worker runs every 10min; these RPCs are dedup-safe via
+  // migration 028's partial unique index on work_queue. Even if they all
+  // returned >0 every tick (they shouldn't), the queue never duplicates.
+
+  const { data: dormantNew, error: dormantRpcErr } = await supabase.rpc(
+    'enqueue_dormant_reactivation_reviews',
+    { p_max_age_days: 60 },
+  );
+  if (dormantRpcErr) {
+    queryErrors.push({ stage: 'dormant_reactivation_rpc', message: dormantRpcErr.message });
+    log.error('dormant_reactivation_rpc_failed', { fn: 'sla-worker', correlationId, err: dormantRpcErr.message });
+  }
+  counters.dormant_reactivation = Number(dormantNew ?? 0);
+
+  const { data: handoffEsc, error: handoffEscErr } = await supabase.rpc(
+    'escalate_stale_handoffs',
+    { p_stale_after_hours: 24 },
+  );
+  if (handoffEscErr) {
+    queryErrors.push({ stage: 'escalate_stale_handoffs_rpc', message: handoffEscErr.message });
+    log.error('escalate_stale_handoffs_failed', { fn: 'sla-worker', correlationId, err: handoffEscErr.message });
+  }
+  counters.handoff_escalated = Number(handoffEsc ?? 0);
+
+  const { data: wonStalled, error: wonStalledErr } = await supabase.rpc(
+    'enqueue_won_without_provisioning_reviews',
+    { p_grace_hours: 24 },
+  );
+  if (wonStalledErr) {
+    queryErrors.push({ stage: 'won_stalled_rpc', message: wonStalledErr.message });
+    log.error('won_stalled_rpc_failed', { fn: 'sla-worker', correlationId, err: wonStalledErr.message });
+  }
+  counters.won_stalled = Number(wonStalled ?? 0);
+
   // Telegram digest — only when there are actual breaches AND the operator
   // configured a Telegram bot. We send ONE summary message per worker run
   // (not one per lead) so the operator's chat doesn't get spammed.
-  if (counters.sla_breach > 0 || counters.payment_pending > 0) {
+  if (counters.sla_breach > 0 || counters.payment_pending > 0 || counters.won_stalled > 0) {
     await maybeNotifyTelegram(counters, correlationId);
   }
 

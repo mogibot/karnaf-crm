@@ -1,24 +1,40 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import clsx from 'clsx';
-import { useAuth } from '@/auth/auth-context';
+import { useAuth, type Role } from '@/auth/auth-context';
 import { t, type TranslationKey } from '@/lib/i18n';
+import { useShortcutHelp } from '@/lib/useKeyboardShortcuts';
+import { ShortcutHelp } from './ShortcutHelp';
 
-interface NavItem { to: string; labelKey: TranslationKey; end?: boolean; adminOnly?: boolean; icon: ReactNode; }
+// Three-tier visibility: sales_rep + viewer get only the lead-pipeline basics;
+// mia (CRM manager) adds analytics + AI tuning surfaces; users + system health
+// stay owner/admin only. See plans/imperative-chasing-stallman.md §1.1.
+type NavTier = 'staff' | 'manager' | 'admin';
+const TIER_ROLES: Record<NavTier, Role[]> = {
+  staff: ['owner', 'admin', 'mia', 'sales_rep', 'viewer'],
+  manager: ['owner', 'admin', 'mia'],
+  admin: ['owner', 'admin'],
+};
+
+interface NavItem { to: string; labelKey: TranslationKey; end?: boolean; tier: NavTier; icon: ReactNode; }
 
 const NAV: NavItem[] = [
-  { to: '/', labelKey: 'nav_dashboard', end: true, icon: <IconDashboard /> },
-  { to: '/leads', labelKey: 'nav_leads', icon: <IconUsers /> },
-  { to: '/queue', labelKey: 'nav_queue', icon: <IconInbox /> },
-  { to: '/analytics', labelKey: 'nav_analytics', icon: <IconChart /> },
-  { to: '/users', labelKey: 'nav_users', adminOnly: true, icon: <IconShield /> },
-  { to: '/prompts', labelKey: 'nav_prompts', adminOnly: true, icon: <IconSparkles /> },
+  { to: '/', labelKey: 'nav_dashboard', end: true, tier: 'staff', icon: <IconDashboard /> },
+  { to: '/leads', labelKey: 'nav_leads', tier: 'staff', icon: <IconUsers /> },
+  { to: '/queue', labelKey: 'nav_queue', tier: 'staff', icon: <IconInbox /> },
+  { to: '/analytics', labelKey: 'nav_analytics', tier: 'manager', icon: <IconChart /> },
+  { to: '/admin/prompts', labelKey: 'nav_prompts', tier: 'manager', icon: <IconSparkles /> },
+  { to: '/admin/product', labelKey: 'nav_product', tier: 'manager', icon: <IconBriefcase /> },
+  { to: '/admin/objections', labelKey: 'nav_objections', tier: 'manager', icon: <IconChat /> },
+  { to: '/admin/reviews', labelKey: 'nav_reviews', tier: 'manager', icon: <IconStar /> },
+  { to: '/admin/users', labelKey: 'nav_users', tier: 'admin', icon: <IconShield /> },
+  { to: '/admin/health', labelKey: 'nav_health', tier: 'admin', icon: <IconHeart /> },
 ];
 
 export function Layout() {
   const auth = useAuth();
-  const isAdmin = auth.role === 'owner' || auth.role === 'admin';
-  const visible = NAV.filter((item) => !item.adminOnly || isAdmin);
+  const role = auth.role;
+  const visible = role ? NAV.filter((item) => TIER_ROLES[item.tier].includes(role)) : [];
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
 
@@ -154,8 +170,15 @@ export function Layout() {
       <main id="kf-main" tabIndex={-1} className="mx-auto max-w-7xl p-4 sm:p-6">
         <Outlet />
       </main>
+
+      <GlobalShortcuts />
     </div>
   );
+}
+
+function GlobalShortcuts() {
+  const { open, close } = useShortcutHelp();
+  return <ShortcutHelp open={open} onClose={close} />;
 }
 
 function getInitials(email?: string | null): string {
@@ -210,6 +233,36 @@ function IconSparkles() {
   return (
     <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7">
       <path strokeLinecap="round" strokeLinejoin="round" d="M10 3v3M10 14v3M3 10h3M14 10h3M5 5l2 2M13 13l2 2M15 5l-2 2M5 15l2-2" />
+    </svg>
+  );
+}
+function IconBriefcase() {
+  return (
+    <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7">
+      <rect x="3" y="6" width="14" height="10" rx="1.5" />
+      <path strokeLinecap="round" d="M7 6V4.5A1.5 1.5 0 0 1 8.5 3h3A1.5 1.5 0 0 1 13 4.5V6" />
+      <path strokeLinecap="round" d="M3 11h14" />
+    </svg>
+  );
+}
+function IconChat() {
+  return (
+    <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 6.5A2.5 2.5 0 0 1 5.5 4h9A2.5 2.5 0 0 1 17 6.5v5A2.5 2.5 0 0 1 14.5 14H8l-3.5 3v-3A2.5 2.5 0 0 1 3 11.5z" />
+    </svg>
+  );
+}
+function IconHeart() {
+  return (
+    <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M10 16.5s-6.5-3.6-6.5-8.5a3.5 3.5 0 0 1 6.5-1.86A3.5 3.5 0 0 1 16.5 8c0 4.9-6.5 8.5-6.5 8.5z" />
+    </svg>
+  );
+}
+function IconStar() {
+  return (
+    <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7">
+      <path strokeLinecap="round" strokeLinejoin="round" d="m10 2.5 2.4 4.85 5.35.78-3.87 3.78.91 5.32L10 14.7l-4.78 2.52.91-5.32-3.87-3.78 5.35-.78z" />
     </svg>
   );
 }

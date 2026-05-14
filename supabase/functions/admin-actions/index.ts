@@ -13,7 +13,8 @@ type ActionName =
   | 'mark_lost'
   | 'mark_won'
   | 'resolve_queue'
-  | 'log_phone_call';
+  | 'log_phone_call'
+  | 'undo_recent_action';
 
 // Per-action role allowlist. Sales reps can only log their own calls and
 // resolve queue items; lifecycle transitions (won/lost/dnc/handoff) and
@@ -27,7 +28,17 @@ const ACTION_ROLES: Record<ActionName, StaffRole[]> = {
   mark_won: ['owner', 'admin', 'mia'],
   resolve_queue: ['owner', 'admin', 'mia', 'sales_rep'],
   log_phone_call: ['owner', 'admin', 'mia', 'sales_rep'],
+  undo_recent_action: ['owner', 'admin', 'mia'],
 };
+
+// Status-changing actions that record `prev_state` in their event_payload
+// so undo_recent_action can roll them back.
+const UNDOABLE_ACTIONS = new Set<ActionName>([
+  'mark_dnc', 'mark_lost', 'mark_won', 'mark_phone_escalation',
+  'assign_to_mia', 'return_to_ai',
+]);
+
+const UNDO_WINDOW_SECONDS = 600; // 10 minutes — plenty of room for a toast undo + a "wait, what?" double-take.
 
 interface ActionPayload {
   action: ActionName;
@@ -78,8 +89,82 @@ Deno.serve(async (req) => {
 
   if (!leadId) return jsonResponse(req, { error: 'Missing leadId' }, 400);
 
-  const meta = { actor_user_id: staff.userId, role: staff.role, note: note ?? null, correlation_id: correlationId };
+  const meta: Record<string, unknown> = { actor_user_id: staff.userId, role: staff.role, note: note ?? null, correlation_id: correlationId };
   const ts = new Date().toISOString();
+
+  // For undoable actions, snapshot the columns we're about to touch so
+  // undo_recent_action can roll them back. Reads are cheap; skip for the
+  // log_phone_call / resolve_queue paths.
+  if (UNDOABLE_ACTIONS.has(action)) {
+    const { data: prev } = await supabase
+      .from('leads')
+      .select('lead_status, ownership_mode, do_not_contact, won_at, lost_at, lost_reason, requested_phone_call, human_owner_id, last_human_touch_at')
+      .eq('id', leadId)
+      .maybeSingle();
+    if (prev) meta.prev_state = prev;
+  }
+
+  // ── Undo handler — reverses the most recent undoable action by this
+  // user on this lead, if it fired within UNDO_WINDOW_SECONDS.
+  if (action === 'undo_recent_action') {
+    const cutoff = new Date(Date.now() - UNDO_WINDOW_SECONDS * 1000).toISOString();
+    const { data: recent, error: histErr } = await supabase
+      .from('lead_events')
+      .select('id, event_type, event_payload, created_at')
+      .eq('lead_id', leadId)
+      .gte('created_at', cutoff)
+      .order('created_at', { ascending: false })
+      .limit(20);
+    if (histErr) return jsonResponse(req, { error: histErr.message }, 500);
+    // Find the most recent event that (a) is one of the UNDOABLE_*
+    // event_types, (b) was written by this same user, (c) carries prev_state.
+    const undoable = (recent ?? []).find((row) => {
+      const pl = (row.event_payload ?? {}) as Record<string, unknown>;
+      return typeof row.event_type === 'string'
+        && (row.event_type.startsWith('manual_mark_')
+            || row.event_type === 'manual_assign_to_mia'
+            || row.event_type === 'manual_return_to_ai'
+            || row.event_type === 'manual_phone_escalation')
+        && pl.actor_user_id === staff.userId
+        && pl.prev_state && typeof pl.prev_state === 'object'
+        && pl.undone !== true;
+    });
+    if (!undoable) {
+      return jsonResponse(req, { error: 'Nothing to undo in window' }, 404);
+    }
+    const prev = (undoable.event_payload as { prev_state: Record<string, unknown> }).prev_state;
+    // Restore the snapshot's columns. Nullables go back to null, booleans
+    // to their captured value. We deliberately do NOT re-create old queue
+    // items — those are operational follow-ups; if Mia un-wons a lead the
+    // human_handoff queue item that mark_won created is left as-is so
+    // ops still sees the noise once.
+    const restore: Record<string, unknown> = {
+      lead_status: prev.lead_status,
+      ownership_mode: prev.ownership_mode,
+      do_not_contact: prev.do_not_contact ?? false,
+      won_at: prev.won_at ?? null,
+      lost_at: prev.lost_at ?? null,
+      lost_reason: prev.lost_reason ?? null,
+      requested_phone_call: prev.requested_phone_call ?? false,
+      human_owner_id: prev.human_owner_id ?? null,
+      last_human_touch_at: prev.last_human_touch_at ?? null,
+    };
+    const { error: updErr } = await supabase.from('leads').update(restore).eq('id', leadId);
+    if (updErr) return jsonResponse(req, { error: updErr.message }, 500);
+    // Flag the original event so a double-undo can't fire.
+    await supabase
+      .from('lead_events')
+      .update({ event_payload: { ...(undoable.event_payload as object), undone: true, undone_by: staff.userId, undone_at: ts } })
+      .eq('id', undoable.id);
+    await logLeadEvent(supabase, leadId, 'manual_action_undone', staff.role, {
+      ...meta, original_event_id: undoable.id, original_event_type: undoable.event_type,
+    }, conversationId ?? undefined, staff.userId);
+    log.info('admin_action_undone', {
+      fn: 'admin-actions', correlationId, userId: staff.userId, leadId,
+      originalEvent: undoable.event_type,
+    });
+    return jsonResponse(req, { ok: true, action, restored: prev, originalEvent: undoable.event_type });
+  }
 
   switch (action) {
     case 'assign_to_mia': {
