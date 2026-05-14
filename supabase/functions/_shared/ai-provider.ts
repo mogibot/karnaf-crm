@@ -226,3 +226,21 @@ export function getAiProvider(): AiProvider {
   if (PROVIDERS.groq.isConfigured()) return PROVIDERS.groq;
   return PROVIDERS.openai;
 }
+
+/**
+ * Returns the ordered list of configured providers to try, given the
+ * caller-preferred primary. Used by ai-decision-service to walk the
+ * fallback chain when the primary's circuit breaker is open. Skips
+ * providers that aren't configured at all (no point trying OpenAI if
+ * OPENAI_API_KEY is unset).
+ */
+export function getProviderFallbackChain(primary: AiProvider): AiProvider[] {
+  // Order: primary first, then deterministic remainder. OpenAI → Gemini →
+  // Groq, skipping the primary so it isn't tried twice.
+  const all: AiProvider[] = [PROVIDERS.openai, PROVIDERS.gemini, PROVIDERS.groq];
+  const ordered: AiProvider[] = [primary];
+  for (const p of all) {
+    if (p.name !== primary.name && p.isConfigured()) ordered.push(p);
+  }
+  return ordered;
+}

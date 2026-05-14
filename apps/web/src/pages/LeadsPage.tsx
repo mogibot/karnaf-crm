@@ -41,6 +41,10 @@ export function LeadsPage() {
   const [status, setStatus] = useState(searchParams.get('status') ?? '');
   const [heat, setHeat] = useState(searchParams.get('heat') ?? '');
   const [ownership, setOwnership] = useState(searchParams.get('ownership') ?? '');
+  // Analytics drill-down can land here with source + date range pre-applied.
+  const [source, setSource] = useState(searchParams.get('source') ?? '');
+  const [fromIso, setFromIso] = useState(searchParams.get('from') ?? '');
+  const [toIso, setToIso] = useState(searchParams.get('to') ?? '');
   const [offset, setOffset] = useState(0);
   const [showCreate, setShowCreate] = useState(false);
   const [sortBy, setSortBy] = useState<LeadsListSortColumn>(
@@ -74,16 +78,22 @@ export function LeadsPage() {
     if (status) next.set('status', status);
     if (heat) next.set('heat', heat);
     if (ownership) next.set('ownership', ownership);
+    if (source) next.set('source', source);
+    if (fromIso) next.set('from', fromIso);
+    if (toIso) next.set('to', toIso);
     if (sortBy !== 'updated_at') next.set('sortBy', sortBy);
     if (sortDir !== 'desc') next.set('sortDir', sortDir);
     setSearchParams(next, { replace: true });
-  }, [status, heat, ownership, sortBy, sortDir, setSearchParams]);
+  }, [status, heat, ownership, source, fromIso, toIso, sortBy, sortDir, setSearchParams]);
 
   const params = {
     search: debouncedSearch.trim() || undefined,
     status: status || undefined,
     heat: heat || undefined,
     ownershipMode: ownership || undefined,
+    source: source || undefined,
+    from: fromIso || undefined,
+    to: toIso || undefined,
     sortBy,
     sortDir,
     limit: PAGE_SIZE,
@@ -232,10 +242,12 @@ export function LeadsPage() {
   const total = q.data?.total ?? null;
   const start = total != null ? offset + 1 : null;
   const end = total != null ? Math.min(offset + (q.data?.leads.length ?? 0), total) : null;
-  const hasFilters = !!(search || status || heat || ownership);
+  const hasFilters = !!(search || status || heat || ownership || source || fromIso || toIso);
 
   function clearFilters() {
-    setSearch(''); setStatus(''); setHeat(''); setOwnership(''); setOffset(0);
+    setSearch(''); setStatus(''); setHeat(''); setOwnership('');
+    setSource(''); setFromIso(''); setToIso('');
+    setOffset(0);
   }
 
   return (
@@ -293,6 +305,14 @@ export function LeadsPage() {
           <option value="">{t('filter_all_ownership')}</option>
           {OWNERS.map((o) => <option key={o} value={o}>{OWNERSHIP_LABELS[o]}</option>)}
         </select>
+        {(source || fromIso || toIso) ? (
+          <div className="sm:col-span-2 md:col-span-5 flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-slate-500">סינון ניווט:</span>
+            {source ? <span className="kf-badge kf-badge-mute">מקור: {source}</span> : null}
+            {fromIso ? <span className="kf-badge kf-badge-mute">מ: {fromIso.slice(0, 10)}</span> : null}
+            {toIso ? <span className="kf-badge kf-badge-mute">עד: {toIso.slice(0, 10)}</span> : null}
+          </div>
+        ) : null}
         <SavedFiltersPicker
           savedFilters={savedFiltersQ.data ?? []}
           hasFiltersNow={hasFilters || sortBy !== 'updated_at' || sortDir !== 'desc'}

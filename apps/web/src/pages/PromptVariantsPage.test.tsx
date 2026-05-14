@@ -14,11 +14,18 @@ vi.mock('@/lib/api', () => ({
   // PromptVariantsPage also imports this; the rating-stats query is
   // rendered in the per-variant card. Without the mock, page render crashes.
   fetchPromptVariantRatingStats: vi.fn(),
+  // P2.2 added change-request flow imports — required to render even
+  // the admin path (mia path uses ManagerRequestPanel which calls these).
+  fetchPromptVariantChangeRequests: vi.fn(),
+  postRequestPromptVariantChange: vi.fn(),
+  postReviewPromptVariantChangeRequest: vi.fn(),
 }));
 
 import {
   fetchPromptVariants, postCreatePromptVariant, postUpdatePromptVariant,
   postDeletePromptVariant, fetchPromptVariantRatingStats,
+  fetchPromptVariantChangeRequests, postRequestPromptVariantChange,
+  postReviewPromptVariantChangeRequest,
 } from '@/lib/api';
 
 function makeVariant(over: Partial<PromptVariantRow> = {}): PromptVariantRow {
@@ -80,14 +87,36 @@ beforeEach(() => {
   vi.mocked(postUpdatePromptVariant).mockResolvedValue({ ok: true, variant: makeVariant() });
   vi.mocked(postDeletePromptVariant).mockResolvedValue({ ok: true });
   vi.mocked(fetchPromptVariantRatingStats).mockResolvedValue([]);
+  vi.mocked(fetchPromptVariantChangeRequests).mockResolvedValue([]);
+  vi.mocked(postRequestPromptVariantChange).mockResolvedValue({
+    ok: true,
+    request: {
+      id: 'req-1', variant_id: null, playbook_name: 'qualification',
+      request_kind: 'tweak_guidance', rationale: '', proposed_change: {},
+      status: 'pending', requested_by: 'admin-1', requested_at: '2026-05-14T08:00:00Z',
+      reviewed_by: null, reviewed_at: null, reviewer_note: null,
+    },
+  });
+  vi.mocked(postReviewPromptVariantChangeRequest).mockResolvedValue({
+    ok: true,
+    request: { id: 'req-1', status: 'accepted', reviewed_by: 'admin-1', reviewed_at: '2026-05-14T08:00:00Z', reviewer_note: null },
+  });
 });
 
 afterEach(() => vi.clearAllMocks());
 
 describe('PromptVariantsPage', () => {
-  it('redirects non-admins to home', () => {
-    renderPrompts('mia');
+  it('redirects sales_rep + viewer to home (read-only is manager+)', () => {
+    renderPrompts('sales_rep');
     expect(screen.getByText('home outlet')).toBeInTheDocument();
+  });
+
+  it('renders read-only manager view for mia (P2.2)', async () => {
+    renderPrompts('mia');
+    // mia gets the page now, not a redirect.
+    expect(await screen.findByText(/מצב צפייה/)).toBeInTheDocument();
+    // No "create variant" form for non-admin.
+    expect(screen.queryByRole('button', { name: /הוספת גרסה/ })).not.toBeInTheDocument();
   });
 
   it('lists variants grouped per playbook for admins', async () => {

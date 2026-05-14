@@ -604,7 +604,11 @@ function Transcript({ messages, leadId }: { messages: MessageRow[]; leadId: stri
   const auth = useAuthForTune();
   const canTune = auth.role === 'owner' || auth.role === 'admin';
   const canRate = auth.role === 'owner' || auth.role === 'admin' || auth.role === 'mia' || auth.role === 'sales_rep';
-  const canDebug = auth.role === 'owner' || auth.role === 'admin';
+  // P3.6 — Open the decision inspector to managers (mia), not just admin.
+  // Mia now sees variant + playbook + flags inline, so her thumbs-up/down
+  // ratings have visible context. Admins still see the technical fields.
+  const canDebug = auth.role === 'owner' || auth.role === 'admin' || auth.role === 'mia';
+  const isAdmin = auth.role === 'owner' || auth.role === 'admin';
   const grouped = useMemo(() => groupByDay(messages), [messages]);
 
   const reviewsQ = useQuery({
@@ -665,7 +669,7 @@ function Transcript({ messages, leadId }: { messages: MessageRow[]; leadId: stri
                     <ReviewWidget decisionId={m.ai_decision_id} leadId={leadId} existing={existing} />
                   ) : null}
                   {canDebug && m.sender_type === 'ai' && m.ai_decision_id ? (
-                    <DebugPanel decision={decisionsById.get(m.ai_decision_id) ?? null} />
+                    <DebugPanel decision={decisionsById.get(m.ai_decision_id) ?? null} isAdmin={isAdmin} />
                   ) : null}
                 </li>
               );
@@ -677,7 +681,7 @@ function Transcript({ messages, leadId }: { messages: MessageRow[]; leadId: stri
   );
 }
 
-function DebugPanel({ decision }: { decision: AiDecisionMetadata | null }) {
+function DebugPanel({ decision, isAdmin }: { decision: AiDecisionMetadata | null; isAdmin: boolean }) {
   const [open, setOpen] = useState(false);
   if (!decision) {
     return (
@@ -700,13 +704,17 @@ function DebugPanel({ decision }: { decision: AiDecisionMetadata | null }) {
       onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}
     >
       <summary className="cursor-pointer select-none px-2 py-1 text-slate-600 hover:text-brand-700">
-        🔍 פרטי AI
+        🔍 פרטי AI · גרסה {decision.prompt_version}
       </summary>
       <dl className="space-y-1 p-2">
         <DebugRow k="playbook" v={decision.playbook_name} />
         <DebugRow k="prompt_version" v={decision.prompt_version} />
-        <DebugRow k="model" v={decision.model_name} />
-        <DebugRow k="status" v={decision.execution_status} highlight={decision.execution_status !== 'gemini_success' && decision.execution_status !== 'openai_success' && decision.execution_status !== 'groq_success'} />
+        {isAdmin ? <DebugRow k="model" v={decision.model_name} /> : null}
+        <DebugRow
+          k="status"
+          v={decision.execution_status}
+          highlight={!decision.execution_status.endsWith('_success')}
+        />
         {intent ? <DebugRow k="intent" v={intent} /> : null}
         {sendMode ? <DebugRow k="send_mode" v={sendMode} /> : null}
         {decision.error_message ? <DebugRow k="error" v={decision.error_message} highlight /> : null}
@@ -719,6 +727,11 @@ function DebugPanel({ decision }: { decision: AiDecisionMetadata | null }) {
             <div className="mt-1 text-[11px] text-slate-600 line-through">{rawReply}</div>
             <div className="mt-1 text-[11px] text-slate-700">{validatedReply ?? '(הוסר)'}</div>
           </div>
+        ) : null}
+        {!isAdmin ? (
+          <p className="mt-2 rounded bg-slate-50 p-2 text-[11px] text-slate-600">
+            💡 גרסת ה-prompt שצוינה למעלה היא זו שייצרה את התשובה. הדרוג שלך נשמר ומשפיע על המשקל של הגרסה בריצה הלילית הבאה.
+          </p>
         ) : null}
       </dl>
     </details>

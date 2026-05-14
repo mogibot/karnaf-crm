@@ -29,6 +29,9 @@ Deno.serve(async (req) => {
   const status = url.searchParams.get('status');
   const heat = url.searchParams.get('heat');
   const ownershipMode = url.searchParams.get('ownershipMode');
+  const source = url.searchParams.get('source');
+  const fromIso = url.searchParams.get('from');
+  const toIso = url.searchParams.get('to');
   const search = url.searchParams.get('search');
   const limit = Math.min(Number(url.searchParams.get('limit') ?? 50), 200);
   const offset = Math.max(0, Number(url.searchParams.get('offset') ?? 0));
@@ -53,6 +56,15 @@ Deno.serve(async (req) => {
   if (status) query = query.eq('lead_status', status);
   if (heat) query = query.eq('lead_heat', heat);
   if (ownershipMode) query = query.eq('ownership_mode', ownershipMode);
+  if (source) query = query.eq('source', source);
+  // Date range — `from`/`to` are ISO timestamps. Filter on created_at so
+  // analytics drill-down ("cohort week → these leads") lands the right set.
+  if (fromIso && Number.isFinite(Date.parse(fromIso))) {
+    query = query.gte('created_at', new Date(Date.parse(fromIso)).toISOString());
+  }
+  if (toIso && Number.isFinite(Date.parse(toIso))) {
+    query = query.lte('created_at', new Date(Date.parse(toIso)).toISOString());
+  }
   if (search) {
     const safe = escapeForOr(search);
     if (safe) query = query.or(`full_name.ilike.%${safe}%,phone.ilike.%${safe}%,email.ilike.%${safe}%`);

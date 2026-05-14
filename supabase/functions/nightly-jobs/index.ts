@@ -82,13 +82,17 @@ Deno.serve(async (req) => {
   const reweight = await runGuardedJob(supabase, 'auto_reweight_prompt_variants',
     async () => ({ data: await autoReweightPromptVariants(supabase, correlationId) }),
     correlationId);
+  // P4.2 — purge_webhook_inbox is a no-op when migration 034 isn't applied.
+  // runGuardedJob catches the "function does not exist" error gracefully.
+  const inboxPurge = await runGuardedJob(supabase, 'purge_webhook_inbox',
+    () => supabase.rpc('purge_webhook_inbox', { p_retention_days: 30 }), correlationId);
 
-  const summary = { decay, purge, compact, reweight };
+  const summary = { decay, purge, compact, reweight, inboxPurge };
   log.info('nightly_jobs_run', { fn: 'nightly-jobs', correlationId, summary });
 
   // Surface a non-2xx if any guarded job errored after claiming. Skipped
   // (already-ran-today) is NOT an error — that's the idempotency working.
-  const anyErrored = [decay, purge, compact, reweight].some((r) => r.error);
+  const anyErrored = [decay, purge, compact, reweight, inboxPurge].some((r) => r.error);
   return jsonResponse(req, { ok: !anyErrored, correlationId, summary }, anyErrored ? 500 : 200);
 });
 

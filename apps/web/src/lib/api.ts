@@ -64,7 +64,10 @@ export type LeadsListSortColumn =
 export type SortDir = 'asc' | 'desc';
 
 export interface LeadsListParams {
-  status?: string; heat?: string; ownershipMode?: string; search?: string;
+  status?: string; heat?: string; ownershipMode?: string; source?: string;
+  search?: string;
+  /** ISO timestamps for analytics drill-down filtering by created_at. */
+  from?: string; to?: string;
   limit?: number; offset?: number;
   sortBy?: LeadsListSortColumn;
   sortDir?: SortDir;

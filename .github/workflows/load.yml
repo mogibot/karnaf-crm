@@ -1,0 +1,53 @@
+name: Load tests
+
+# Manual dispatch only — these incur Supabase function invocations on
+# staging and shouldn't run on every PR. See e2e/load/README.md for
+# threshold details.
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: 'Which scenario to run'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - intake-flood
+          - dashboard-refresh
+          - cron-concurrent
+
+permissions:
+  contents: read
+
+jobs:
+  k6:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install k6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install -y k6
+      - name: Run intake-flood
+        if: ${{ github.event.inputs.scenario == 'all' || github.event.inputs.scenario == 'intake-flood' }}
+        env:
+          BASE_URL: ${{ secrets.STAGING_FUNCTIONS_URL }}
+          INTAKE_SECRET: ${{ secrets.STAGING_INTAKE_WEBHOOK_SECRET }}
+        run: k6 run e2e/load/intake-flood.js
+      - name: Run dashboard-refresh
+        if: ${{ github.event.inputs.scenario == 'all' || github.event.inputs.scenario == 'dashboard-refresh' }}
+        env:
+          BASE_URL: ${{ secrets.STAGING_FUNCTIONS_URL }}
+          SUPABASE_ANON: ${{ secrets.STAGING_SUPABASE_ANON_KEY }}
+          STAFF_JWT: ${{ secrets.STAGING_STAFF_JWT }}
+        run: k6 run e2e/load/dashboard-refresh.js
+      - name: Run cron-concurrent
+        if: ${{ github.event.inputs.scenario == 'all' || github.event.inputs.scenario == 'cron-concurrent' }}
+        env:
+          BASE_URL: ${{ secrets.STAGING_FUNCTIONS_URL }}
+          SLA_WORKER_SECRET: ${{ secrets.STAGING_SLA_WORKER_SECRET }}
+        run: k6 run e2e/load/cron-concurrent.js

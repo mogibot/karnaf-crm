@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { fetchAnalyticsSummary } from '@/lib/api';
@@ -5,8 +6,47 @@ import { STATUS_LABELS, formatRelative } from '@/lib/format';
 import { t } from '@/lib/i18n';
 import { useDocumentTitle } from '@/lib/useDocumentTitle';
 
+type DateRangePreset = 'all' | '7d' | '30d' | '90d' | 'custom';
+
+function presetToRange(preset: DateRangePreset): { from: string; to: string } {
+  const now = new Date();
+  if (preset === 'all') return { from: '', to: '' };
+  const days = preset === '7d' ? 7 : preset === '30d' ? 30 : preset === '90d' ? 90 : 0;
+  if (days === 0) return { from: '', to: '' };
+  const from = new Date(now.getTime() - days * 24 * 3600 * 1000);
+  return {
+    from: from.toISOString().slice(0, 10),
+    to: now.toISOString().slice(0, 10),
+  };
+}
+
+function toIsoStartOfDay(d: string): string | undefined {
+  if (!d) return undefined;
+  const t = Date.parse(`${d}T00:00:00Z`);
+  return Number.isFinite(t) ? new Date(t).toISOString() : undefined;
+}
+function toIsoEndOfDay(d: string): string | undefined {
+  if (!d) return undefined;
+  const t = Date.parse(`${d}T23:59:59Z`);
+  return Number.isFinite(t) ? new Date(t).toISOString() : undefined;
+}
+
 export function AnalyticsPage() {
-  const q = useQuery({ queryKey: ['analytics'], queryFn: fetchAnalyticsSummary });
+  const [preset, setPreset] = useState<DateRangePreset>('all');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
+  const range = useMemo(() => {
+    if (preset === 'custom') return { from: customFrom, to: customTo };
+    return presetToRange(preset);
+  }, [preset, customFrom, customTo]);
+
+  const drillFromIso = toIsoStartOfDay(range.from);
+  const drillToIso = toIsoEndOfDay(range.to);
+
+  const q = useQuery({
+    queryKey: ['analytics', range.from, range.to],
+    queryFn: fetchAnalyticsSummary,
+  });
   useDocumentTitle(t('analytics_title'));
 
   if (q.isLoading) return <p className="text-slate-500">{t('loading')} נתונים...</p>;
@@ -15,16 +55,45 @@ export function AnalyticsPage() {
 
   const { sourcePerformance, aging, recentActivity, aiVsHuman, promptVariants, cohorts, firstResponseTimes } = q.data;
 
+  function leadsLinkFor(opts: { source?: string; status?: string }): string {
+    const sp = new URLSearchParams();
+    if (opts.source) sp.set('source', opts.source);
+    if (opts.status) sp.set('status', opts.status);
+    if (drillFromIso) sp.set('from', drillFromIso);
+    if (drillToIso) sp.set('to', drillToIso);
+    const qs = sp.toString();
+    return qs ? `/leads?${qs}` : '/leads';
+  }
+
   return (
     <div className="space-y-6">
-      <header className="flex items-center justify-between">
+      <header className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-2xl font-semibold tracking-tight">{t('analytics_title')}</h1>
-        <button
-          type="button" className="kf-btn kf-btn-ghost"
-          onClick={() => q.refetch()}
-          disabled={q.isFetching}
-        >{q.isFetching ? t('refreshing') : t('refresh')}</button>
+        <div className="flex flex-wrap items-center gap-2">
+          <DateRangePicker
+            preset={preset}
+            customFrom={customFrom}
+            customTo={customTo}
+            onPreset={setPreset}
+            onCustomFrom={setCustomFrom}
+            onCustomTo={setCustomTo}
+          />
+          <button
+            type="button" className="kf-btn kf-btn-ghost text-xs"
+            onClick={() => downloadAnalyticsCsv(q.data)}
+          >ייצוא CSV</button>
+          <button
+            type="button" className="kf-btn kf-btn-ghost"
+            onClick={() => q.refetch()}
+            disabled={q.isFetching}
+          >{q.isFetching ? t('refreshing') : t('refresh')}</button>
+        </div>
       </header>
+      {(range.from || range.to) ? (
+        <p className="text-xs text-slate-500">
+          טווח: {range.from || '∞'} → {range.to || 'היום'} · הערה: סיכומי-מקור ו-cohorts מתבססים על תצוגות מצטברות; טווח התאריכים פעיל בעיקר על drill-down לרשימת לידים.
+        </p>
+      ) : null}
 
       <section className="kf-card p-4 sm:p-5">
         <h2 className="text-lg font-semibold">{t('analytics_by_source')}</h2>
@@ -47,13 +116,23 @@ export function AnalyticsPage() {
                 <tr><td colSpan={8} className="p-4 text-center text-slate-500">{t('analytics_no_data')}</td></tr>
               ) : sourcePerformance.map((row) => (
                 <tr key={row.source}>
-                  <td className="font-medium">{row.source}</td>
-                  <td className="tabular-nums">{row.leads_total}</td>
+                  <td className="font-medium">
+                    <Link to={leadsLinkFor({ source: row.source })} className="text-brand-700 hover:underline">
+                      {row.source}
+                    </Link>
+                  </td>
+                  <td className="tabular-nums">
+                    <Link to={leadsLinkFor({ source: row.source })} className="hover:text-brand-700">{row.leads_total}</Link>
+                  </td>
                   <td className="tabular-nums">{row.leads_engaged}</td>
                   <td className="tabular-nums">{row.leads_qualified}</td>
                   <td className="tabular-nums">{row.leads_checkout_pushed}</td>
-                  <td className="tabular-nums text-emerald-700">{row.leads_won}</td>
-                  <td className="tabular-nums text-slate-500">{row.leads_lost}</td>
+                  <td className="tabular-nums text-emerald-700">
+                    <Link to={leadsLinkFor({ source: row.source, status: 'won' })} className="hover:underline">{row.leads_won}</Link>
+                  </td>
+                  <td className="tabular-nums text-slate-500">
+                    <Link to={leadsLinkFor({ source: row.source, status: 'lost' })} className="hover:underline">{row.leads_lost}</Link>
+                  </td>
                   <td className="tabular-nums">
                     <ConversionBar pct={row.win_rate_pct} />
                   </td>
@@ -125,7 +204,9 @@ export function AnalyticsPage() {
               <tbody>
                 {firstResponseTimes.map((row) => (
                   <tr key={row.source}>
-                    <td className="font-medium">{row.source}</td>
+                    <td className="font-medium">
+                      <Link to={leadsLinkFor({ source: row.source })} className="text-brand-700 hover:underline">{row.source}</Link>
+                    </td>
                     <td className="tabular-nums">{row.measured_leads}</td>
                     <td className="tabular-nums">{formatMinutes(row.p50_minutes)}</td>
                     <td className="tabular-nums">{formatMinutes(row.p90_minutes)}</td>
@@ -169,7 +250,9 @@ export function AnalyticsPage() {
                 {cohorts.map((c, i) => (
                   <tr key={`${c.cohort_week}::${c.source}::${i}`}>
                     <td className="tabular-nums">{formatWeek(c.cohort_week)}</td>
-                    <td className="font-medium">{c.source}</td>
+                    <td className="font-medium">
+                      <Link to={leadsLinkFor({ source: c.source })} className="text-brand-700 hover:underline">{c.source}</Link>
+                    </td>
                     <td className="tabular-nums">{c.leads_total}</td>
                     <td className="tabular-nums">{c.responded}</td>
                     <td className="tabular-nums">{c.qualified}</td>
@@ -285,4 +368,91 @@ function formatWeek(iso: string): string {
   if (!Number.isFinite(ts)) return iso;
   const d = new Date(ts);
   return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getFullYear()).slice(-2)}`;
+}
+
+// ── Date range picker (P3.1) ─────────────────────────────────────────────
+function DateRangePicker({
+  preset, customFrom, customTo, onPreset, onCustomFrom, onCustomTo,
+}: {
+  preset: DateRangePreset;
+  customFrom: string;
+  customTo: string;
+  onPreset: (p: DateRangePreset) => void;
+  onCustomFrom: (v: string) => void;
+  onCustomTo: (v: string) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-sm">
+      <select className="kf-input text-sm" value={preset} onChange={(e) => onPreset(e.target.value as DateRangePreset)}>
+        <option value="all">כל הזמן</option>
+        <option value="7d">7 ימים אחרונים</option>
+        <option value="30d">30 ימים אחרונים</option>
+        <option value="90d">90 ימים אחרונים</option>
+        <option value="custom">טווח מותאם</option>
+      </select>
+      {preset === 'custom' ? (
+        <>
+          <input type="date" className="kf-input text-sm" value={customFrom} onChange={(e) => onCustomFrom(e.target.value)} />
+          <span className="text-slate-400">→</span>
+          <input type="date" className="kf-input text-sm" value={customTo} onChange={(e) => onCustomTo(e.target.value)} />
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+// ── CSV export (P3.1) ────────────────────────────────────────────────────
+// Wraps the analytics summary into a multi-section CSV — section headers
+// as blank-line-separated blocks. Excel reads UTF-8 BOM + handles RTL
+// Hebrew without import-as-data fiddling.
+type AnalyticsSummary = Awaited<ReturnType<typeof fetchAnalyticsSummary>>;
+
+function csvEsc(s: unknown): string {
+  const v = s == null ? '' : String(s);
+  if (/[",\r\n]/.test(v)) return `"${v.replace(/"/g, '""')}"`;
+  return v;
+}
+
+function downloadAnalyticsCsv(data: AnalyticsSummary) {
+  const blocks: string[][] = [];
+
+  blocks.push(['Source performance']);
+  blocks.push(['source', 'total', 'engaged', 'qualified', 'checkout', 'won', 'lost', 'win_rate_pct']);
+  for (const r of data.sourcePerformance) {
+    blocks.push([r.source, String(r.leads_total), String(r.leads_engaged), String(r.leads_qualified),
+      String(r.leads_checkout_pushed), String(r.leads_won), String(r.leads_lost), String(r.win_rate_pct)]);
+  }
+  blocks.push(['']);
+
+  blocks.push(['Aging by status (avg / max minutes)']);
+  blocks.push(['status', 'count', 'avg_minutes', 'max_minutes']);
+  for (const [status, b] of Object.entries(data.aging)) {
+    blocks.push([status, String(b.count), String(b.avgMinutes), String(b.maxMinutes)]);
+  }
+  blocks.push(['']);
+
+  blocks.push(['First-response SLA']);
+  blocks.push(['source', 'measured', 'p50_min', 'p90_min', 'max_min', 'unanswered']);
+  for (const r of data.firstResponseTimes) {
+    blocks.push([r.source, String(r.measured_leads), String(r.p50_minutes),
+      String(r.p90_minutes), String(r.max_minutes), String(r.unanswered_leads)]);
+  }
+  blocks.push(['']);
+
+  blocks.push(['Cohorts (per week × source)']);
+  blocks.push(['cohort_week', 'source', 'total', 'responded', 'qualified', 'checkout', 'won', 'lost', 'win_rate_pct', 'avg_minutes_to_win']);
+  for (const c of data.cohorts) {
+    blocks.push([c.cohort_week, c.source, String(c.leads_total), String(c.responded),
+      String(c.qualified), String(c.checkout_pushed), String(c.won), String(c.lost),
+      String(c.win_rate_pct), String(c.avg_minutes_to_win ?? '')]);
+  }
+
+  const csv = blocks.map((row) => row.map(csvEsc).join(',')).join('\r\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `karnaf-analytics-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }

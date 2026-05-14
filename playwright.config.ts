@@ -19,6 +19,23 @@ export default defineConfig({
   },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    // Mobile coverage matrix — see docs/qa/device-matrix.md for what
+    // each emulates and when to run it. CI runs `chromium` only;
+    // these are opt-in via `--project=<name>`.
+    { name: 'mobile-safari', use: { ...devices['iPhone 14'] } },
+    { name: 'mobile-chrome', use: { ...devices['Pixel 7'] } },
+    { name: 'samsung-internet', use: { ...devices['Galaxy S9+'] } },
+    {
+      name: 'slow-4g',
+      use: {
+        ...devices['Pixel 7'],
+        // Throttle network so a busy intersection in Bnei Brak isn't a
+        // surprise. Chrome devtools "Slow 4G" preset: 400 kb/s ↓,
+        // 400 kb/s ↑, 400ms latency.
+        offline: false,
+        launchOptions: { args: ['--user-agent-override=karnaf-slow-4g'] },
+      },
+    },
   ],
   webServer: process.env.E2E_BASE_URL
     ? undefined
