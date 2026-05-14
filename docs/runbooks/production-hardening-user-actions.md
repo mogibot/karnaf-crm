@@ -284,21 +284,96 @@ confirm everything is green:
 
 ---
 
-## Phase 2/3/4 outline (next sessions)
+## Phase 2 / 3 / 4 — user actions
 
-This session covered Phase 0 + 1 + the gating Phase-2 test fix. The
-remaining plan items live in `~/.claude/plans/drifting-chasing-rocket.md`:
+Phase 2 + 3 + 4 all landed code-side on this branch. Below are the
+**post-deploy user actions** they require.
 
-- **Phase 2 (operator UX):** nav-doesn't-lie-to-mia, undo on destructive
-  actions, optimistic updates, multi-operator presence, native IG reply,
-  inline next-action setter, mobile touch-target sweep, browser
-  notifications.
-- **Phase 3 (manager elevation):** date-range + drill-down + CSV on
-  Analytics, bulk actions, sort, saved filters, keyboard shortcuts, AI
-  feedback transparency, lifecycle dead-end fixes.
-- **Phase 4 (reliability / DR):** backup-restore drill, webhook payload
-  persistence + replay, AI provider failover, load-test harness, pilot
-  with 5 personas, PII export/delete, runbooks, real-device QA.
+### Migrations to apply (in order)
 
-Each phase is 1-2 weeks. Start the next session by re-reading
-`Agent-OpenClaw/working-context.md` + the plan file.
+```bash
+supabase db push --project-ref svkzkpgccahwmyflobvn
+# Confirms 029-034 all applied:
+supabase migration list --project-ref svkzkpgccahwmyflobvn
+```
+
+| Migration | What it adds | Phase |
+|---|---|---|
+| 029_prompt_variant_change_requests | Manager → admin change-request flow table | P2.2 |
+| 031_saved_filters | lead_saved_filters table with RLS | P3.4 |
+| 032_dormant_reactivation | 3 RPCs (dormant / handoff TTL / won-onboarding-stalled) | P3.7 |
+| 033_ownership_consistency_trigger | Trigger logging conv vs lead ownership divergence | P3.7 |
+| 034_webhook_inbox | Raw payload persistence + purge_webhook_inbox RPC | P4.2 |
+
+### Functions to deploy (after migrations)
+
+```bash
+# Updated:
+supabase functions deploy prompt-variants leads-manage leads-list \
+  admin-actions sla-worker nightly-jobs send-reply leads-intake \
+  --project-ref svkzkpgccahwmyflobvn
+
+# New:
+supabase functions deploy webhook-replay pii-export pii-delete \
+  --project-ref svkzkpgccahwmyflobvn
+```
+
+### Production smoke checks (Phase 2-4)
+
+- [ ] Log in as Mia (mia tier). Open `/admin/prompts` — see read-only
+      stats + change-request form. No redirect.
+- [ ] Mark a test lead `won`. Toast shows "בטל" button — clicking it
+      reverts within 10s (verifies P2.3 undo + P2.4 optimistic).
+- [ ] Open the same lead in two browsers. Both see the other's avatar
+      in the header (P2.5 presence).
+- [ ] In `/leads`, select 5 rows, hit "ייצוא CSV". Open in Excel; Hebrew
+      renders correctly (P3.2).
+- [ ] Click a source name in `/analytics` → lands at `/leads?source=...`
+      with the source filter active and date range pre-applied (P3.1).
+- [ ] Hit `?` from any page — keyboard shortcuts cheatsheet pops (P3.5).
+- [ ] Press `J` then `K` on `/leads` — focus moves to next/prev row.
+- [ ] Wait for the next sla-worker tick. Verify `dormant_reactivation`
+      or `won_onboarding_stalled` queue items appear if you have leads
+      matching (P3.7).
+
+### Production smoke — Phase 4 reliability
+
+- [ ] `curl https://...functions.supabase.co/healthz?deep=1` returns
+      `ok:true` with `db.ok`, `ai.configured`, and `cron.detail`
+      reflecting a recent nightly run.
+- [ ] Run the **backup restore drill** (`docs/runbooks/backup-restore.md`)
+      against a scratch project. Note the RTO in the history table.
+- [ ] After the next webhook server_error in production, hit
+      `/functions/v1/webhook-replay` with `{"inboxId": "<id>"}` and
+      verify the replay creates a fresh `webhook_inbox` row marked
+      `success`.
+- [ ] PII export: pick a test lead, POST to `pii-export` with
+      `{"leadId":"..."}`, confirm the JSON bundle has 10 tables.
+- [ ] Trigger a manual k6 run via `gh workflow run load.yml --field
+      scenario=intake-flood`. Threshold (`p95<800ms`) should pass on
+      staging.
+
+### Items still requiring external dashboards (carried forward)
+
+These are the same items called out in Phase 0/1 above — none of them
+are completable from a Claude Code session:
+
+- [ ] Supabase service-role + anon key rotation + tmp file deletion.
+- [ ] GitHub master branch protection via `gh api`.
+- [ ] All webhook secrets set (`INTAKE_WEBHOOK_SECRET`,
+      `PAYMENT_WEBHOOK_SECRET`, `EMAIL_WEBHOOK_SECRET`,
+      `WHATSAPP_APP_SECRET`, `META_APP_SECRET`).
+- [ ] Sentry DSN (`VITE_SENTRY_DSN` + `SENTRY_DSN`) — the shim auto-
+      ingests once set; full @sentry/react SDK upgrade is optional.
+- [ ] Telegram alerts (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALERT_CHAT_ID`).
+- [ ] Uptime monitor pointed at the new `/healthz` endpoints.
+- [ ] Meta App: WhatsApp template `karnaf_followup_v1`, IG webhook
+      subscription, FB Lead Ads webhook, `FACEBOOK_PAGE_ACCESS_TOKEN`.
+- [ ] Form snippet on karnafnadlan.com, ManyChat External Request, GAS
+      inbound script in Google Sheets.
+
+### Pilot rollout (after the smoke checks pass)
+
+Follow `docs/pilot/scenarios.md`. Five personas, 60min each, in this
+order: Mia → sales_rep on phone → admin → inbound lead → multi-operator.
+Triage findings as P1/P2/P3; ship P1 fixes before pilot day 2.
