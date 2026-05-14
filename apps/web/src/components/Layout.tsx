@@ -12,6 +12,7 @@ const NAV: NavItem[] = [
   { to: '/leads', labelKey: 'nav_leads', icon: <IconUsers /> },
   { to: '/queue', labelKey: 'nav_queue', icon: <IconInbox /> },
   { to: '/analytics', labelKey: 'nav_analytics', icon: <IconChart /> },
+  { to: '/team', labelKey: 'nav_team', adminOnly: true, icon: <IconUsers /> },
   { to: '/users', labelKey: 'nav_users', adminOnly: true, icon: <IconShield /> },
   { to: '/prompts', labelKey: 'nav_prompts', adminOnly: true, icon: <IconSparkles /> },
 ];

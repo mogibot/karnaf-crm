@@ -235,6 +235,22 @@ export async function postUpdateUser(payload: {
   return postJson<{ ok: true; profile: ProfileRow }>('/users-manage', { action: 'update', ...payload });
 }
 
+export interface TeamMember {
+  user_id: string;
+  email: string | null;
+  full_name: string | null;
+  role: ProfileRow['role'];
+  is_active: boolean;
+  active_leads_owned: number;
+  recent_touches_7d: number;
+  last_active_at: string | null;
+}
+
+export async function fetchTeamWorkload() {
+  const r = await getJson<{ ok: true; members: TeamMember[] }>('/team-workload');
+  return r.members;
+}
+
 // === Prompt variants =====================================================
 
 export type PlaybookName =
