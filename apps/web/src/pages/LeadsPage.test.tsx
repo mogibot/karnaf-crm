@@ -94,10 +94,10 @@ afterEach(() => {
 });
 
 describe('LeadsPage', () => {
-  it('renders the loading row while leads are being fetched', () => {
+  it('renders the loading skeleton while leads are being fetched', () => {
     vi.mocked(fetchLeadsList).mockImplementation(() => new Promise(() => {}));
     renderLeads();
-    expect(screen.getByText('טוען...')).toBeInTheDocument();
+    expect(screen.getByTestId('leads-skeleton')).toBeInTheDocument();
   });
 
   it('renders leads with deep links to the detail route and total count', async () => {

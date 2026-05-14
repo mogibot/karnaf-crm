@@ -8,6 +8,7 @@ import {
 } from '@/lib/api';
 import { HeatBadge, OwnershipBadge, StatusBadge } from '@/components/Badge';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { LeadDetailSkeleton } from '@/components/Skeleton';
 import { t } from '@/lib/i18n';
 import { QUEUE_LABELS, formatDateTime, formatRelative } from '@/lib/format';
 import type { MessageRow } from '@/lib/types';
@@ -96,7 +97,7 @@ export function LeadDetailPage() {
   });
   const canEditMeta = auth.role === 'owner' || auth.role === 'admin' || auth.role === 'mia';
 
-  if (detailQ.isLoading) return <p className="text-slate-500">{t('loading')}</p>;
+  if (detailQ.isLoading) return <LeadDetailSkeleton />;
   if (detailQ.error) return <p className="text-rose-600">{t('error_prefix')}: {(detailQ.error as Error).message}</p>;
   if (!detailQ.data) return null;
 

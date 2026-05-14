@@ -4,6 +4,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { fetchLeadsList, fetchUsersList, postBulkLeadAction } from '@/lib/api';
 import { HeatBadge, OwnershipBadge, StatusBadge } from '@/components/Badge';
 import { BulkActionBar } from '@/components/BulkActionBar';
+import { LeadsTableSkeleton } from '@/components/Skeleton';
 import { useToast } from '@/components/Toast';
 import { useAuth } from '@/auth/auth-context';
 import { formatRelative, STATUS_LABELS, HEAT_LABELS, OWNERSHIP_LABELS } from '@/lib/format';
@@ -326,7 +327,9 @@ export function LeadsPage() {
           </thead>
           <tbody>
             {q.isLoading ? (
-              <tr><td colSpan={canBulkEdit ? 8 : 7} className="p-6 text-center text-slate-500">{t('loading')}</td></tr>
+              <tr><td colSpan={canBulkEdit ? 8 : 7} className="p-0">
+                <LeadsTableSkeleton rows={6} />
+              </td></tr>
             ) : q.data && q.data.leads.length > 0 ? (
               q.data.leads.map((lead) => (
                 <tr key={lead.id} className={selected.has(lead.id) ? 'bg-brand-50/50' : undefined}>
