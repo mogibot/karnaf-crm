@@ -251,6 +251,32 @@ export async function fetchTeamWorkload() {
   return r.members;
 }
 
+export interface LeadSource {
+  slug: string;
+  display_name: string;
+  is_active: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function fetchLeadSources() {
+  const r = await getJson<{ ok: true; sources: LeadSource[] }>('/lead-sources');
+  return r.sources;
+}
+
+export async function postCreateLeadSource(payload: { slug: string; display_name: string; sort_order?: number }) {
+  return postJson<{ ok: true; source: LeadSource }>('/lead-sources', { action: 'create', ...payload });
+}
+
+export async function postUpdateLeadSource(payload: { slug: string; display_name?: string; is_active?: boolean; sort_order?: number }) {
+  return postJson<{ ok: true; source: LeadSource }>('/lead-sources', { action: 'update', ...payload });
+}
+
+export async function postDeleteLeadSource(slug: string) {
+  return postJson<{ ok: true }>('/lead-sources', { action: 'delete', slug });
+}
+
 // === Prompt variants =====================================================
 
 export type PlaybookName =

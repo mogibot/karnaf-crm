@@ -17,6 +17,7 @@ const QueuePage = lazy(() => import('@/pages/QueuePage').then((m) => ({ default:
 const AnalyticsPage = lazy(() => import('@/pages/AnalyticsPage').then((m) => ({ default: m.AnalyticsPage })));
 const UsersPage = lazy(() => import('@/pages/UsersPage').then((m) => ({ default: m.UsersPage })));
 const TeamPage = lazy(() => import('@/pages/TeamPage').then((m) => ({ default: m.TeamPage })));
+const SourcesPage = lazy(() => import('@/pages/SourcesPage').then((m) => ({ default: m.SourcesPage })));
 const PromptVariantsPage = lazy(() => import('@/pages/PromptVariantsPage').then((m) => ({ default: m.PromptVariantsPage })));
 const PermissionsHelpPage = lazy(() => import('@/pages/PermissionsHelpPage').then((m) => ({ default: m.PermissionsHelpPage })));
 
@@ -44,6 +45,7 @@ const router = createBrowserRouter([
           { path: '/analytics', element: <Suspense fallback={<PageFallback />}><AnalyticsPage /></Suspense> },
           { path: '/users', element: <Suspense fallback={<PageFallback />}><UsersPage /></Suspense> },
           { path: '/team', element: <Suspense fallback={<PageFallback />}><TeamPage /></Suspense> },
+          { path: '/admin/sources', element: <Suspense fallback={<PageFallback />}><SourcesPage /></Suspense> },
           { path: '/prompts', element: <Suspense fallback={<PageFallback />}><PromptVariantsPage /></Suspense> },
           { path: '/help/permissions', element: <Suspense fallback={<PageFallback />}><PermissionsHelpPage /></Suspense> },
           { path: '*', element: <Navigate to="/" replace /> },

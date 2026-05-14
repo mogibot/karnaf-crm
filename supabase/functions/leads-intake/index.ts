@@ -14,10 +14,37 @@ import { correlationFromRequest, log } from '../_shared/logger.ts';
 import { getRuntimeConfig } from '../_shared/config-service.ts';
 import { checkRateLimit, clientIdentifier } from '../_shared/rate-limit.ts';
 
-const ALLOWED_SOURCES = new Set([
+const FALLBACK_ALLOWED_SOURCES = new Set([
   'landing_page','webinar','responder_form','lead_magnet','whatsapp_direct',
   'instagram_dm','manual_entry','screenshot_manual','unknown',
 ]);
+
+// Edge-function instances are short-lived but reused across invocations
+// while warm. Cache the active source slugs for 5 minutes so the admin
+// panel changes propagate quickly without hammering the DB every request.
+const SOURCES_CACHE_TTL_MS = 5 * 60 * 1000;
+let cachedSources: { fetchedAt: number; slugs: Set<string> } | null = null;
+
+async function loadAllowedSources(supabase: ReturnType<typeof getServiceSupabase>): Promise<Set<string>> {
+  if (cachedSources && Date.now() - cachedSources.fetchedAt < SOURCES_CACHE_TTL_MS) {
+    return cachedSources.slugs;
+  }
+  const { data, error } = await supabase
+    .from('lead_sources')
+    .select('slug')
+    .eq('is_active', true);
+  if (error) {
+    // Fail open to the hard-coded set — refusing intake during a DB
+    // hiccup is worse than accepting a known-good slug.
+    log.warn('lead_sources_lookup_failed', { fn: 'leads-intake', err: error.message });
+    return FALLBACK_ALLOWED_SOURCES;
+  }
+  const slugs = new Set<string>((data ?? []).map((r) => r.slug as string));
+  // Defensive: always honour 'unknown' even if the row was deleted.
+  slugs.add('unknown');
+  cachedSources = { fetchedAt: Date.now(), slugs };
+  return slugs;
+}
 
 Deno.serve(async (req) => {
   const pre = preflight(req);
@@ -76,7 +103,8 @@ Deno.serve(async (req) => {
   }
 
   const sourceInput = String(payload.source ?? 'unknown').toLowerCase();
-  const source = ALLOWED_SOURCES.has(sourceInput) ? sourceInput : 'unknown';
+  const allowedSources = await loadAllowedSources(supabase);
+  const source = allowedSources.has(sourceInput) ? sourceInput : 'unknown';
 
   const lead = await upsertLead(supabase, {
     phone: phone ?? null,

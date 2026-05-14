@@ -18,6 +18,7 @@ const HE = {
   nav_users: 'משתמשים',
   nav_prompts: 'תבניות AI',
   nav_team: 'צוות',
+  nav_sources: 'מקורות',
 
   // Queue
   queue_title: 'תורי עבודה',
@@ -177,6 +178,7 @@ const EN: Partial<Record<keyof typeof HE, string>> = {
   nav_users: 'Users',
   nav_prompts: 'AI Prompts',
   nav_team: 'Team',
+  nav_sources: 'Sources',
   queue_title: 'Queues',
   queue_total_items: 'items',
   queue_open: 'Open',

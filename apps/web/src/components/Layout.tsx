@@ -13,6 +13,7 @@ const NAV: NavItem[] = [
   { to: '/queue', labelKey: 'nav_queue', icon: <IconInbox /> },
   { to: '/analytics', labelKey: 'nav_analytics', icon: <IconChart /> },
   { to: '/team', labelKey: 'nav_team', adminOnly: true, icon: <IconUsers /> },
+  { to: '/admin/sources', labelKey: 'nav_sources', adminOnly: true, icon: <IconChart /> },
   { to: '/users', labelKey: 'nav_users', adminOnly: true, icon: <IconShield /> },
   { to: '/prompts', labelKey: 'nav_prompts', adminOnly: true, icon: <IconSparkles /> },
 ];
