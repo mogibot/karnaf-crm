@@ -35,10 +35,13 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: latest
-      # `supabase lint` (no --linked) lints local migration SQL without
-      # requiring a project link — runnable on every PR.
-      - name: Lint Supabase migrations
-        run: supabase lint
+      # `supabase lint` was dropped — the top-level `lint` command isn't
+      # available in the supabase CLI version installed by setup-cli@v1
+      # (it became `supabase db lint`, which requires a linked project +
+      # running DB). The meaningful SQL gate runs at deploy time via
+      # `supabase db push` (which rejects malformed migrations). The Edge
+      # Function syntax check below is the real CI gate.
+      #
       # `deno check` must fail the build. A syntax error in any Edge
       # Function used to silently slip through because of `|| true`.
       - name: Validate Edge Function bundles
