@@ -71,6 +71,13 @@ export async function fetchLeadsList(params: LeadsListParams = {}) {
   return { leads: r.leads, total: r.total, limit: r.limit, offset: r.offset };
 }
 
+export interface HumanOwnerProfile {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+  role: string | null;
+}
+
 export async function fetchLeadDetail(leadId: string) {
   return getJson<{
     ok: true;
@@ -80,6 +87,7 @@ export async function fetchLeadDetail(leadId: string) {
     queueItems: QueueRow[];
     tasks: TaskRow[];
     events: EventRow[];
+    humanOwnerProfile: HumanOwnerProfile | null;
   }>('/lead-detail', { leadId });
 }
 

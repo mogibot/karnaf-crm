@@ -4,6 +4,7 @@ import { ensurePendingQueueItem, resolveQueueItem } from '../_shared/queue-servi
 import { logLeadEvent, transitionLeadStatus, updateLeadFields } from '../_shared/lead-service.ts';
 import { AuthError, requireStaff, type StaffRole } from '../_shared/auth.ts';
 import { correlationFromRequest, log } from '../_shared/logger.ts';
+import { env } from '../_shared/env.ts';
 
 type ActionName =
   | 'assign_to_mia'
@@ -126,8 +127,51 @@ Deno.serve(async (req) => {
       break;
     }
     case 'return_to_ai': {
-      await updateLeadFields(supabase, leadId, { ownership_mode: 'ai_active' });
+      // ⚠️ Operator-reported bug (2026-05-15): after Mia hits "return to AI",
+      // the ownership flips but the AI has no inbound message to react to,
+      // so it stays silent — the lead falls through the cracks. Fire the
+      // orchestrator immediately so the AI evaluates the current conversation
+      // state and can decide whether to send a follow-up. The orchestrator
+      // is itself idempotent on conversation lock + ownership_mode, so a
+      // racing inbound webhook can't double-fire.
+      await updateLeadFields(supabase, leadId, {
+        ownership_mode: 'ai_active',
+        // Clear human ownership so the UI's "owned by" indicator drops
+        // back to "AI", not the operator who just released.
+        human_owner_id: null,
+      });
       await logLeadEvent(supabase, leadId, 'manual_return_to_ai', staff.role, meta, conversationId ?? undefined, staff.userId);
+      // Find the active conversation if the caller didn't supply one — we
+      // need to fire orchestrate with a conversationId.
+      let cid = conversationId ?? null;
+      if (!cid) {
+        const { data: conv } = await supabase
+          .from('conversations')
+          .select('id')
+          .eq('lead_id', leadId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        cid = conv?.id ?? null;
+      }
+      if (cid) {
+        const orchestrateUrl = `${env.supabaseUrl()}/functions/v1/orchestrate-message`;
+        // Fire-and-forget — the orchestrator handles its own locking +
+        // ownership recheck. A 404/timeout here doesn't block the operator's
+        // action.
+        fetch(orchestrateUrl, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${env.serviceRoleKey()}`,
+            'Content-Type': 'application/json',
+            'x-correlation-id': correlationId,
+            'x-trigger': 'manual_return_to_ai',
+          },
+          body: JSON.stringify({ leadId, conversationId: cid }),
+        }).catch((err) => log.error('orchestrate_dispatch_after_return_failed', {
+          fn: 'admin-actions', correlationId, leadId, err: String(err),
+        }));
+      }
       break;
     }
     case 'mark_phone_escalation': {

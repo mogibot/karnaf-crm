@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import {
   fetchLeadDetail, postAdminAction, postSendReply, postQueueResolve,
-  type AdminAction, type CallOutcome, type LeadMetaUpdates,
+  type AdminAction, type CallOutcome, type LeadMetaUpdates, type HumanOwnerProfile,
 } from '@/lib/api';
 import { HeatBadge, OwnershipBadge, StatusBadge } from '@/components/Badge';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -13,6 +13,7 @@ import type { MessageRow } from '@/lib/types';
 import { useAuth } from '@/auth/auth-context';
 import { useToast } from '@/components/Toast';
 import { useDocumentTitle } from '@/lib/useDocumentTitle';
+import { useRealtimeInvalidate } from '@/lib/useRealtimeInvalidate';
 
 export function LeadDetailPage() {
   const { leadId = '' } = useParams<{ leadId: string }>();
@@ -23,9 +24,28 @@ export function LeadDetailPage() {
     queryKey: ['lead-detail', leadId],
     queryFn: () => fetchLeadDetail(leadId),
     enabled: !!leadId,
+    // ⚠️ Live-update bug (2026-05-15): without polling, the lead detail
+    // loaded ONCE on mount and never refreshed, so inbound WhatsApp messages
+    // didn't appear until the operator clicked something else. 5s poll is
+    // the floor; realtime invalidation below short-circuits it when a
+    // change actually fires. refetchIntervalInBackground stays false so
+    // hidden tabs don't burn quota.
+    refetchInterval: 5000,
+    refetchIntervalInBackground: false,
   });
 
   useDocumentTitle(detailQ.data?.lead.full_name || 'ליד');
+
+  // Live updates: subscribe to Postgres changes scoped to THIS lead so the
+  // transcript / ownership / queue refreshes within ~1s of the inbound
+  // landing in the DB. The filter keeps us from invalidating on every
+  // other lead's messages in the same publication. Migration 029 adds the
+  // required tables to `supabase_realtime`.
+  const leadDetailKey: Array<readonly unknown[]> = [['lead-detail', leadId]];
+  useRealtimeInvalidate('messages', leadDetailKey, { filter: `lead_id=eq.${leadId}` });
+  useRealtimeInvalidate('leads', leadDetailKey, { filter: `id=eq.${leadId}` });
+  useRealtimeInvalidate('work_queue', leadDetailKey, { filter: `lead_id=eq.${leadId}` });
+  useRealtimeInvalidate('conversation_claims', leadDetailKey);
 
   const action = useMutation({
     mutationFn: (input: { action: AdminAction; note?: string; label: string }) =>
@@ -97,7 +117,7 @@ export function LeadDetailPage() {
   if (detailQ.error) return <p className="text-rose-600">{t('error_prefix')}: {(detailQ.error as Error).message}</p>;
   if (!detailQ.data) return null;
 
-  const { lead, messages, queueItems, tasks, events } = detailQ.data;
+  const { lead, messages, queueItems, tasks, events, humanOwnerProfile } = detailQ.data;
 
   return (
     <div className="space-y-4">
@@ -113,6 +133,12 @@ export function LeadDetailPage() {
           {lead.do_not_contact ? <span className="kf-badge bg-rose-100 text-rose-700">DNC</span> : null}
           {lead.removed_by_request ? <span className="kf-badge bg-rose-100 text-rose-700">הוסר לבקשתו</span> : null}
         </div>
+        {/* ⚠️ Operator-reported bug (2026-05-15): customers were getting AI
+            replies, then handed off, then nobody responded — partly because
+            it wasn't visible WHO owned the lead at any given moment. This
+            row is the single source-of-truth answer. */}
+        <CurrentOwnerLine ownershipMode={lead.ownership_mode} humanOwner={humanOwnerProfile} />
+
         <dl className="mt-3 grid grid-cols-1 gap-x-6 gap-y-1 text-sm text-slate-600 sm:grid-cols-2 lg:grid-cols-3">
           <ContactRow label="טלפון" value={lead.phone} kind="phone" />
           <ContactRow label="אימייל" value={lead.email} kind="email" />
@@ -619,5 +645,55 @@ function ReplyBox({ disabled, onSend, sending, errorMessage }: {
       </div>
       {errorMessage ? <p className="text-sm text-rose-600">{errorMessage}</p> : null}
     </form>
+  );
+}
+
+// ── Current owner line (P2 — operator clarity) ───────────────────────────
+// Singular source of truth on the question "who is responsible RIGHT NOW
+// for this lead?". Combines ownership_mode + the human profile (when
+// applicable) into one Hebrew line, color-coded by who owns it.
+//
+// Why this matters: Mia reported that after an AI→human handoff, the
+// next step was unclear ("did anyone catch this?"). Surfacing the
+// owner prominently — including when AI is the active owner — closes
+// the visibility gap that was costing leads.
+function CurrentOwnerLine({
+  ownershipMode,
+  humanOwner,
+}: {
+  ownershipMode: string;
+  humanOwner: HumanOwnerProfile | null;
+}) {
+  const ai = ownershipMode === 'ai_active';
+  const phone = ownershipMode === 'phone_sales_pending';
+  const human = ownershipMode === 'mia_active' || (!!humanOwner && !ai && !phone);
+
+  let label: string;
+  let detail: string | null = null;
+  let bg: string;
+
+  if (ai) {
+    label = '🤖 הליד באחריות ה-AI';
+    detail = 'נציג אוטומטי עונה על הודעות נכנסות לפי playbook + variant פעיל';
+    bg = 'bg-sky-50 text-sky-900 border-sky-200';
+  } else if (phone) {
+    label = '📞 ממתין לשיחת טלפון יזומה';
+    detail = 'נציג אנושי הסמין שצריך לחייג; ה-AI לא יענה עד שיוחזר אליו';
+    bg = 'bg-amber-50 text-amber-900 border-amber-200';
+  } else if (human) {
+    const name = humanOwner?.full_name || humanOwner?.email || 'נציג אנושי';
+    label = `👤 מטפל: ${name}`;
+    detail = 'ה-AI מושעה. כשהנציג מסיים — צריך "החזרה ל-AI" כדי לשחזר מענה אוטומטי';
+    bg = 'bg-emerald-50 text-emerald-900 border-emerald-200';
+  } else {
+    label = `מצב בעלות: ${ownershipMode}`;
+    bg = 'bg-slate-50 text-slate-700 border-slate-200';
+  }
+
+  return (
+    <div className={`mt-3 rounded-lg border px-3 py-2 text-sm ${bg}`}>
+      <div className="font-medium">{label}</div>
+      {detail ? <div className="text-xs opacity-80">{detail}</div> : null}
+    </div>
   );
 }
