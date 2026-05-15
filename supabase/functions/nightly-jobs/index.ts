@@ -22,10 +22,13 @@ interface JobResult {
   error?: string;
 }
 
+// The `fn` is awaited inside so callers can pass either a plain Promise
+// or a thenable (e.g. `supabase.rpc(...)` returns a PostgrestFilterBuilder
+// that is thenable but not literally `Promise<T>`). PromiseLike covers both.
 async function runGuardedJob(
   supabase: SupabaseClientLike,
   kind: string,
-  fn: () => Promise<{ data?: unknown; error?: { message: string } | null }>,
+  fn: () => PromiseLike<{ data?: unknown; error?: { message: string } | null }>,
   correlationId: string,
 ): Promise<JobResult> {
   const { data: claimed, error: claimErr } = await supabase.rpc('claim_job_run', { p_kind: kind });
