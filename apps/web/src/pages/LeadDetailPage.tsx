@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import {
@@ -9,7 +9,7 @@ import { HeatBadge, OwnershipBadge, StatusBadge } from '@/components/Badge';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { t } from '@/lib/i18n';
 import { QUEUE_LABELS, formatDateTime, formatRelative } from '@/lib/format';
-import type { MessageRow } from '@/lib/types';
+import type { LeadFit, LeadHeat, MessageRow, ReadinessLevel } from '@/lib/types';
 import { useAuth } from '@/auth/auth-context';
 import { useToast } from '@/components/Toast';
 import { useDocumentTitle } from '@/lib/useDocumentTitle';
@@ -204,6 +204,25 @@ export function LeadDetailPage() {
                 DNC
               </button>
             </ActionGroup>
+            {/* Reopen — visible only for terminal/dead-end states. won_at stays
+                intact (analytics keeps the conversion); lost_at + DNC clear so
+                AI can resume the conversation. */}
+            {lead.lead_status === 'won' || lead.lead_status === 'lost' || lead.do_not_contact ? (
+              <ActionGroup label="פתיחה מחדש">
+                <button
+                  type="button"
+                  className="kf-btn kf-btn-primary"
+                  onClick={() => setPendingAction({
+                    action: 'reopen_lead',
+                    label: 'הליד נפתח מחדש',
+                    description: 'הליד יחזור למצב פעיל, ה-AI יקבל את ההיסטוריה ויחליט אם וכיצד להגיב. סטטוס "נסגר" יישאר בדוחות הקנייה.',
+                    destructive: false,
+                  })}
+                >
+                  פתח שיחה מחדש
+                </button>
+              </ActionGroup>
+            ) : null}
           </div>
         ) : null}
         {action.error ? <p className="mt-2 text-sm text-rose-600">{(action.error as Error).message}</p> : null}
@@ -236,6 +255,75 @@ export function LeadDetailPage() {
         </div>
 
         <aside className="space-y-4">
+          {/* Operator-editable identity card. Phone is intentionally read-only
+              (it's the routing key for inbound webhooks; rewriting it would
+              orphan the conversation history). */}
+          <div className="kf-card p-4">
+            <h2 className="font-semibold">פרטי קשר</h2>
+            <dl className="mt-2 space-y-1 text-sm">
+              <EditableRow
+                k="שם מלא"
+                v={lead.full_name}
+                editable={canEditMeta}
+                onSave={(next) => updateMeta.mutate({ full_name: next })}
+              />
+              <EditableRow
+                k="אימייל"
+                v={lead.email}
+                editable={canEditMeta}
+                onSave={(next) => updateMeta.mutate({ email: next })}
+              />
+              <EditableRow
+                k="עיר"
+                v={lead.city}
+                editable={canEditMeta}
+                onSave={(next) => updateMeta.mutate({ city: next })}
+              />
+              <Row k="טלפון" v={lead.phone} />
+            </dl>
+          </div>
+
+          <div className="kf-card p-4">
+            <h2 className="font-semibold">סיווג ליד</h2>
+            <dl className="mt-2 space-y-1 text-sm">
+              <EditableEnumRow
+                k="חום"
+                v={lead.lead_heat}
+                editable={canEditMeta}
+                options={[
+                  { value: 'hot', label: 'חם' },
+                  { value: 'warm', label: 'פושר' },
+                  { value: 'cool', label: 'צונן' },
+                  { value: 'cold', label: 'קר' },
+                ]}
+                onSave={(next) => updateMeta.mutate({ lead_heat: next as LeadHeat | null })}
+              />
+              <EditableEnumRow
+                k="התאמה"
+                v={lead.lead_fit}
+                editable={canEditMeta}
+                options={[
+                  { value: 'high', label: 'גבוהה' },
+                  { value: 'medium', label: 'בינונית' },
+                  { value: 'low', label: 'נמוכה' },
+                ]}
+                onSave={(next) => updateMeta.mutate({ lead_fit: next as LeadFit | null })}
+              />
+              <EditableEnumRow
+                k="בשלות"
+                v={lead.readiness_level}
+                editable={canEditMeta}
+                options={[
+                  { value: 'paying', label: 'משלם' },
+                  { value: 'decided', label: 'החליט' },
+                  { value: 'considering', label: 'שוקל' },
+                  { value: 'exploring', label: 'מתעניין' },
+                ]}
+                onSave={(next) => updateMeta.mutate({ readiness_level: next as ReadinessLevel | null })}
+              />
+            </dl>
+          </div>
+
           <div className="kf-card p-4">
             <h2 className="font-semibold">הקשר ליד</h2>
             <dl className="mt-2 space-y-1 text-sm">
@@ -258,6 +346,12 @@ export function LeadDetailPage() {
                 onSave={(next) => updateMeta.mutate({ main_blocker: next })}
               />
               <EditableRow
+                k="הקשר החלטה"
+                v={lead.decision_context}
+                editable={canEditMeta}
+                onSave={(next) => updateMeta.mutate({ decision_context: next })}
+              />
+              <EditableRow
                 k="פעולה הבאה"
                 v={lead.next_action_type}
                 editable={canEditMeta}
@@ -265,6 +359,14 @@ export function LeadDetailPage() {
               />
               <Row k="עד" v={lead.next_action_due_at ? formatDateTime(lead.next_action_due_at) : null} />
               <Row k="סטטוס תשלום" v={lead.payment_status} />
+              {lead.lead_status === 'lost' || lead.lost_reason ? (
+                <EditableRow
+                  k="סיבת אובדן"
+                  v={lead.lost_reason}
+                  editable={canEditMeta}
+                  onSave={(next) => updateMeta.mutate({ lost_reason: next })}
+                />
+              ) : null}
             </dl>
           </div>
 
@@ -448,6 +550,42 @@ function EditableRow({
   );
 }
 
+function EditableEnumRow({
+  k, v, editable, options, onSave,
+}: {
+  k: string;
+  v: string | null | undefined;
+  editable: boolean;
+  options: Array<{ value: string; label: string }>;
+  onSave: (next: string | null) => void;
+}) {
+  const display = options.find((o) => o.value === v)?.label ?? v ?? '—';
+  if (!editable) return <Row k={k} v={display} />;
+  return (
+    <div className="grid grid-cols-3 items-center gap-2">
+      <dt className="col-span-1 text-slate-500">{k}</dt>
+      <dd className="col-span-2 flex items-center gap-2 text-slate-800">
+        {/* Native select wins here over a custom popover — Mia uses this on
+            mobile a lot, and native pickers behave correctly with the OS
+            keyboard + screen reader without extra a11y wiring. */}
+        <select
+          value={v ?? ''}
+          className="kf-input text-sm"
+          onChange={(e) => {
+            const next = e.target.value;
+            onSave(next.length ? next : null);
+          }}
+        >
+          <option value="">— ללא —</option>
+          {options.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+      </dd>
+    </div>
+  );
+}
+
 function DataRow({ label, value }: { label: string; value: string | null | undefined }) {
   return (
     <div className="flex items-baseline gap-2">
@@ -496,6 +634,14 @@ const dayFormatter = new Intl.DateTimeFormat('he-IL', { weekday: 'long', day: '2
 
 function Transcript({ messages }: { messages: MessageRow[] }) {
   const grouped = useMemo(() => groupByDay(messages), [messages]);
+  const bottomRef = useRef<HTMLLIElement | null>(null);
+  // Stick the conversation viewport to the most recent message — operators
+  // expect WhatsApp-style behavior where new inbound + their own outbound
+  // both park them at the bottom. Triggers on mount and whenever messages
+  // grow (realtime invalidation re-renders this with a new array length).
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ block: 'end', behavior: 'auto' });
+  }, [messages.length]);
   if (messages.length === 0) return <p className="mt-2 text-sm text-slate-500">אין הודעות.</p>;
   return (
     <ol className="mt-3 max-h-[60vh] space-y-3 overflow-auto pr-1 sm:max-h-[28rem]">
@@ -523,6 +669,7 @@ function Transcript({ messages }: { messages: MessageRow[] }) {
           </ul>
         </li>
       ))}
+      <li ref={bottomRef} aria-hidden="true" className="h-px" />
     </ol>
   );
 }

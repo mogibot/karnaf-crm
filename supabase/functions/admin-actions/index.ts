@@ -13,6 +13,7 @@ type ActionName =
   | 'mark_dnc'
   | 'mark_lost'
   | 'mark_won'
+  | 'reopen_lead'
   | 'resolve_queue'
   | 'log_phone_call'
   | 'update_lead_meta';
@@ -27,6 +28,7 @@ const ACTION_ROLES: Record<ActionName, StaffRole[]> = {
   mark_dnc: ['owner', 'admin', 'mia'],
   mark_lost: ['owner', 'admin', 'mia'],
   mark_won: ['owner', 'admin', 'mia'],
+  reopen_lead: ['owner', 'admin', 'mia'],
   resolve_queue: ['owner', 'admin', 'mia', 'sales_rep'],
   log_phone_call: ['owner', 'admin', 'mia', 'sales_rep'],
   update_lead_meta: ['owner', 'admin', 'mia'],
@@ -48,19 +50,36 @@ interface ActionPayload {
   };
 }
 
-const META_ALLOWED_FIELDS = new Set(['goal_summary', 'pain_point_summary', 'main_blocker', 'next_action_type']);
+// Operator-editable lead fields. Two tiers:
+//  - free-text fields (capped at META_MAX_LENGTH chars, trimmed, blank → null)
+//  - enum fields (rejected if value not in the per-field allowlist)
+// Phone is intentionally NOT here — it's the lead identity for routing,
+// changing it would orphan inbound webhooks; needs a dedicated migration flow.
+const META_TEXT_FIELDS = new Set([
+  'goal_summary', 'pain_point_summary', 'main_blocker', 'next_action_type',
+  'full_name', 'email', 'city', 'decision_context', 'lost_reason',
+]);
+const META_ENUM_FIELDS: Record<string, Set<string>> = {
+  lead_heat: new Set(['cold', 'cool', 'warm', 'hot']),
+  lead_fit: new Set(['low', 'medium', 'high']),
+  readiness_level: new Set(['exploring', 'considering', 'decided', 'paying']),
+};
 const META_MAX_LENGTH = 280;
 
 function sanitiseMetaUpdates(input: ActionPayload['metaUpdates']): Record<string, string | null> | null {
   if (!input || typeof input !== 'object') return null;
   const out: Record<string, string | null> = {};
   for (const [k, v] of Object.entries(input)) {
-    if (!META_ALLOWED_FIELDS.has(k)) continue;
-    if (v === null) {
-      out[k] = null;
-    } else if (typeof v === 'string') {
-      const trimmed = v.trim().slice(0, META_MAX_LENGTH);
-      out[k] = trimmed.length === 0 ? null : trimmed;
+    if (META_TEXT_FIELDS.has(k)) {
+      if (v === null) {
+        out[k] = null;
+      } else if (typeof v === 'string') {
+        const trimmed = v.trim().slice(0, META_MAX_LENGTH);
+        out[k] = trimmed.length === 0 ? null : trimmed;
+      }
+    } else if (k in META_ENUM_FIELDS) {
+      if (v === null) out[k] = null;
+      else if (typeof v === 'string' && META_ENUM_FIELDS[k].has(v)) out[k] = v;
     }
   }
   return Object.keys(out).length ? out : null;
@@ -206,6 +225,50 @@ Deno.serve(async (req) => {
       await updateLeadFields(supabase, leadId, { won_at: ts });
       await transitionLeadStatus(supabase, leadId, 'won', staff.role, 'manual_mark_won');
       await logLeadEvent(supabase, leadId, 'manual_mark_won', staff.role, meta, conversationId ?? undefined, staff.userId);
+      break;
+    }
+    case 'reopen_lead': {
+      // Operator-driven manual override: the natural state machine treats
+      // won/lost/do_not_contact as terminal, so transition_lead_status() refuses
+      // to walk back. This action bypasses it on purpose — operator decided
+      // the customer is in active conversation again. We keep won_at intact
+      // for analytics/conversion accounting (the lead really did pay), but
+      // clear lost_at + DNC flags so the AI can resume + so reports don't
+      // miscount it as still-lost.
+      await updateLeadFields(supabase, leadId, {
+        lead_status: 'responded',
+        ownership_mode: 'ai_active',
+        human_owner_id: null,
+        do_not_contact: false,
+        removed_by_request: false,
+        lost_at: null,
+        lost_reason: null,
+      });
+      await logLeadEvent(supabase, leadId, 'manual_reopen_lead', staff.role, meta, conversationId ?? undefined, staff.userId);
+      // Same orchestrate-fire pattern as return_to_ai so the AI sees the
+      // current message immediately rather than waiting for the next inbound.
+      let cid = conversationId ?? null;
+      if (!cid) {
+        const { data: conv } = await supabase
+          .from('conversations').select('id').eq('lead_id', leadId)
+          .order('created_at', { ascending: false }).limit(1).maybeSingle();
+        cid = conv?.id ?? null;
+      }
+      if (cid) {
+        const orchestrateUrl = `${env.supabaseUrl()}/functions/v1/orchestrate-message`;
+        fetch(orchestrateUrl, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${env.serviceRoleKey()}`,
+            'Content-Type': 'application/json',
+            'x-correlation-id': correlationId,
+            'x-trigger': 'manual_reopen_lead',
+          },
+          body: JSON.stringify({ leadId, conversationId: cid }),
+        }).catch((err) => log.error('orchestrate_dispatch_after_reopen_failed', {
+          fn: 'admin-actions', correlationId, leadId, err: String(err),
+        }));
+      }
       break;
     }
     case 'update_lead_meta': {
