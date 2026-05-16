@@ -49,6 +49,10 @@ const lead: LeadDetail = {
   won_at: null,
   lost_at: null,
   lost_reason: null,
+  decision_context: null,
+  city: null,
+  lead_fit: null,
+  readiness_level: null,
   human_owner_id: null,
   requested_phone_call: false,
 };

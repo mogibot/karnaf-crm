@@ -1,7 +1,7 @@
 import { supabase } from './supabase';
 import type {
-  ConversationRow, DashboardSummary, EventRow, LeadDetail, LeadRow,
-  MessageRow, QueueRow, TaskRow,
+  ConversationRow, DashboardSummary, EventRow, LeadDetail, LeadFit, LeadHeat,
+  LeadRow, MessageRow, QueueRow, ReadinessLevel, TaskRow,
 } from './types';
 
 const baseUrl = import.meta.env.VITE_FUNCTIONS_BASE_URL || '/functions/v1';
@@ -100,8 +100,8 @@ export async function fetchQueueList(params: { queueType?: string; status?: stri
 
 export type AdminAction =
   | 'assign_to_mia' | 'return_to_ai' | 'mark_phone_escalation'
-  | 'mark_dnc' | 'mark_lost' | 'mark_won' | 'resolve_queue' | 'log_phone_call'
-  | 'update_lead_meta';
+  | 'mark_dnc' | 'mark_lost' | 'mark_won' | 'reopen_lead'
+  | 'resolve_queue' | 'log_phone_call' | 'update_lead_meta';
 
 export type CallOutcome = 'connected' | 'no_answer' | 'voicemail' | 'declined' | 'callback_requested';
 
@@ -110,6 +110,16 @@ export interface LeadMetaUpdates {
   pain_point_summary?: string | null;
   main_blocker?: string | null;
   next_action_type?: string | null;
+  // Operator-editable identity/context — added 2026-05-15 for Mia's day-to-day
+  // edits. Phone is intentionally excluded (it's the routing key).
+  full_name?: string | null;
+  email?: string | null;
+  city?: string | null;
+  decision_context?: string | null;
+  lost_reason?: string | null;
+  lead_heat?: LeadHeat | null;
+  lead_fit?: LeadFit | null;
+  readiness_level?: ReadinessLevel | null;
 }
 
 export async function postAdminAction(payload: {
