@@ -50,6 +50,8 @@ export interface LeadDetail extends LeadRow {
   human_owner_id: string | null;
   requested_phone_call: boolean;
   last_human_touch_at: string | null;
+  ai_playbook_stage: string | null;
+  ai_playbook_stage_at: string | null;
 }
 
 export interface MessageRow {

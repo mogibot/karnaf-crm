@@ -32,8 +32,15 @@ Deno.serve(async (req) => {
   const breach = new Date(now - config.slaThresholds.firstResponseBreachHours * 3600 * 1000).toISOString();
   const paymentBreach = new Date(now - config.slaThresholds.paymentPendingHours * 3600 * 1000).toISOString();
   const dormantBreach = new Date(now - (config.followUpDelays.nurtureHours * 7) * 3600 * 1000).toISOString();
+  // Stuck-AI threshold: catches conversations where the AI dispatch failed
+  // silently (provider error, validation block, etc.) before SLA warn fires.
+  // Conservative default — 20 minutes — well under the 8h SLA warn.
+  const stuckMinutes = 20;
+  const stuck = new Date(now - stuckMinutes * 60 * 1000).toISOString();
 
-  const counters: Record<string, number> = { sla_risk: 0, sla_breach: 0, payment_pending: 0, dormant: 0 };
+  const counters: Record<string, number> = {
+    sla_risk: 0, sla_breach: 0, payment_pending: 0, dormant: 0, ai_stuck: 0,
+  };
 
   // SLA risk: lead has inbound but no outbound after warn threshold.
   const { data: slaRiskLeads } = await supabase
@@ -83,6 +90,28 @@ Deno.serve(async (req) => {
       payloadJson: { correlationId },
     });
     counters.payment_pending++;
+  }
+
+  // AI-stuck: customer wrote, ownership says AI should be replying, but more
+  // than `stuckMinutes` have passed without an outbound. Distinct from the
+  // 8h SLA risk above: this catches silent AI drops (provider errors,
+  // validation blocks) early enough for a human to intervene before the
+  // customer cools off.
+  const { data: stuckAiLeads } = await supabase
+    .from('leads')
+    .select('id')
+    .eq('ownership_mode', 'ai_active')
+    .lt('last_inbound_at', stuck)
+    .or('last_outbound_at.is.null,last_outbound_at.lt.last_inbound_at')
+    .eq('do_not_contact', false)
+    .eq('removed_by_request', false);
+  for (const lead of stuckAiLeads ?? []) {
+    await ensurePendingQueueItem(supabase, {
+      leadId: lead.id, queueType: 'ai_stuck', priorityLevel: 2,
+      reason: `AI לא הגיב תוך ${stuckMinutes} דק׳ — נדרשת בדיקה`,
+      payloadJson: { correlationId, threshold: 'ai_stuck', stuckMinutes },
+    });
+    counters.ai_stuck++;
   }
 
   // Dormant: nurture leads idle for > 7 nurtureHours.

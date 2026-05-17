@@ -50,6 +50,7 @@ export const QUEUE_LABELS: Record<string, string> = {
   weekend_carryover: 'העברה לאחרי סוף שבוע',
   low_fit_cleanup: 'ניקוי לידים לא מתאימים',
   manual_review_required: 'בדיקה ידנית',
+  ai_stuck: 'AI תקוע',
 };
 
 export function heatBadgeClass(heat: LeadHeat | string): string {

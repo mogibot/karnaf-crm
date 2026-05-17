@@ -52,6 +52,8 @@ const lead: LeadDetail = {
   human_owner_id: null,
   requested_phone_call: false,
   last_human_touch_at: null,
+  ai_playbook_stage: null,
+  ai_playbook_stage_at: null,
 };
 
 const conversation: ConversationRow = {

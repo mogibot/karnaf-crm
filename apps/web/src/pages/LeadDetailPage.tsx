@@ -135,6 +135,13 @@ export function LeadDetailPage() {
           {lead.do_not_contact ? <span className="kf-badge bg-rose-100 text-rose-700">DNC</span> : null}
           {lead.removed_by_request ? <span className="kf-badge bg-rose-100 text-rose-700">הוסר לבקשתו</span> : null}
         </div>
+        {lead.ai_playbook_stage ? (
+          <p className="mt-1 text-xs text-slate-500">
+            <span className="opacity-70">שלב AI:</span>{' '}
+            <span className="font-medium text-slate-700">{PLAYBOOK_LABELS[lead.ai_playbook_stage] ?? lead.ai_playbook_stage}</span>
+            {lead.ai_playbook_stage_at ? <span> · עודכן {formatRelative(lead.ai_playbook_stage_at)}</span> : null}
+          </p>
+        ) : null}
         <dl className="mt-2 grid grid-cols-1 gap-x-6 gap-y-1 text-sm text-slate-600 sm:grid-cols-2 lg:grid-cols-3">
           <ContactRow label="טלפון" value={lead.phone} kind="phone" />
           <ContactRow label="אימייל" value={lead.email} kind="email" />
@@ -663,6 +670,18 @@ function ContactRow({ label, value, kind }: { label: string; value: string | nul
 }
 
 const dayFormatter = new Intl.DateTimeFormat('he-IL', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' });
+
+const PLAYBOOK_LABELS: Record<string, string> = {
+  first_contact_whatsapp_inbound: 'מענה ראשון — WhatsApp/IG',
+  first_contact_form_lead: 'מענה ראשון — טופס',
+  qualification: 'איתור צרכים',
+  price_objection: 'התנגדות מחיר',
+  free_advice_boundary: 'גבול ייעוץ חינמי',
+  checkout_push: 'דחיפה לרכישה',
+  payment_pending_rescue: 'חילוץ תשלום ממתין',
+  phone_request: 'בקשה לשיחה',
+  opt_out: 'בקשת הסרה',
+};
 
 function Transcript({ messages }: { messages: MessageRow[] }) {
   const grouped = useMemo(() => groupByDay(messages), [messages]);

@@ -196,6 +196,32 @@ Deno.serve(async (req) => {
     }, correlationId);
 
     const out = decision.output;
+
+    // Auto-escalate to a human phone call when the lead has been milking
+    // free advice across many turns OR has logged repeat phone calls without
+    // moving forward. Keep the existing AI reply (lets the bot acknowledge
+    // before the human follow-up) but force a phone-sales queue item.
+    const FREE_ADVICE_CEILING = 5;
+    const PHONE_CALL_CEILING = 2;
+    let autoEscalated = false;
+    if (!out.escalateToPhoneSales && !out.escalateToMia) {
+      if (freeAdviceCount >= FREE_ADVICE_CEILING || priorPhoneCallCount >= PHONE_CALL_CEILING) {
+        out.escalateToPhoneSales = true;
+        out.createQueueType = 'phone_escalation';
+        out.notesForMia = out.notesForMia ?? (
+          freeAdviceCount >= FREE_ADVICE_CEILING
+            ? `יעוץ חינמי מתמשך (${freeAdviceCount} פניות) — אסקלציה לטלפון.`
+            : `${priorPhoneCallCount} שיחות טלפון קודמות ללא התקדמות.`
+        );
+        autoEscalated = true;
+        log.info('orchestrate_auto_escalated', {
+          fn: 'orchestrate', correlationId, leadId,
+          reason: freeAdviceCount >= FREE_ADVICE_CEILING ? 'free_advice' : 'repeat_calls',
+          freeAdviceCount, priorPhoneCallCount,
+        });
+      }
+    }
+
     const desiredMode = out.sendMode;
     const effectiveMode = resolveSendMode(desiredMode, lead.last_inbound_at, config.whatsappSession.freeformWindowHours);
 
@@ -236,6 +262,10 @@ Deno.serve(async (req) => {
       if (out.nextActionType) updates.next_action_type = out.nextActionType;
       if (out.nextActionDueAt) updates.next_action_due_at = out.nextActionDueAt;
       else updates.next_action_due_at = new Date(Date.now() + config.followUpDelays.firstResponseMinutes * 60_000).toISOString();
+      if (out.playbookName && lead.ai_playbook_stage !== out.playbookName) {
+        updates.ai_playbook_stage = out.playbookName;
+        updates.ai_playbook_stage_at = new Date().toISOString();
+      }
 
       const replyTopics = extractTopicsFromText(out.replyText);
       const inboundTopics = extractTopicsFromText(lastLeadMessage as string | null);
@@ -256,6 +286,7 @@ Deno.serve(async (req) => {
         score_delta: out.scoreDelta,
         heat_update: out.leadHeatUpdate,
         send_mode: effectiveMode,
+        auto_escalated: autoEscalated,
         correlation_id: correlationId,
       }, conversationId);
     } else if (attemptedSend && !sendResult.ok) {

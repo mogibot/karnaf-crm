@@ -12,7 +12,7 @@ import { useDocumentTitle } from '@/lib/useDocumentTitle';
 import { computeSlaState, slaRowClass } from '@/lib/queue-sla';
 
 const QUEUE_TYPES = [
-  '', 'first_response_due', 'hot_lead', 'sla_risk', 'human_handoff',
+  '', 'first_response_due', 'hot_lead', 'sla_risk', 'ai_stuck', 'human_handoff',
   'payment_pending', 'phone_escalation', 'nurture_due', 'dormant_review',
   'failed_automation', 'weekend_carryover', 'low_fit_cleanup',
 ];
