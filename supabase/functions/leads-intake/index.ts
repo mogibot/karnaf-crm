@@ -4,15 +4,47 @@ import { ensurePendingQueueItem } from '../_shared/queue-service.ts';
 import { logLeadEvent, upsertLead } from '../_shared/lead-service.ts';
 import { normalizeIsraeliPhone } from '../_shared/phone.ts';
 import { verifyHmacHeader } from '../_shared/webhook-signature.ts';
+import {
+  getWebhookIdempotencyResponse,
+  hashBody,
+  storeWebhookIdempotencyResponse,
+} from '../_shared/idempotency.ts';
 import { env, optional } from '../_shared/env.ts';
 import { correlationFromRequest, log } from '../_shared/logger.ts';
 import { getRuntimeConfig } from '../_shared/config-service.ts';
 import { checkRateLimit, clientIdentifier } from '../_shared/rate-limit.ts';
 
-const ALLOWED_SOURCES = new Set([
+const FALLBACK_ALLOWED_SOURCES = new Set([
   'landing_page','webinar','responder_form','lead_magnet','whatsapp_direct',
   'instagram_dm','manual_entry','screenshot_manual','unknown',
 ]);
+
+// Edge-function instances are short-lived but reused across invocations
+// while warm. Cache the active source slugs for 5 minutes so the admin
+// panel changes propagate quickly without hammering the DB every request.
+const SOURCES_CACHE_TTL_MS = 5 * 60 * 1000;
+let cachedSources: { fetchedAt: number; slugs: Set<string> } | null = null;
+
+async function loadAllowedSources(supabase: ReturnType<typeof getServiceSupabase>): Promise<Set<string>> {
+  if (cachedSources && Date.now() - cachedSources.fetchedAt < SOURCES_CACHE_TTL_MS) {
+    return cachedSources.slugs;
+  }
+  const { data, error } = await supabase
+    .from('lead_sources')
+    .select('slug')
+    .eq('is_active', true);
+  if (error) {
+    // Fail open to the hard-coded set — refusing intake during a DB
+    // hiccup is worse than accepting a known-good slug.
+    log.warn('lead_sources_lookup_failed', { fn: 'leads-intake', err: error.message });
+    return FALLBACK_ALLOWED_SOURCES;
+  }
+  const slugs = new Set<string>((data ?? []).map((r) => r.slug as string));
+  // Defensive: always honour 'unknown' even if the row was deleted.
+  slugs.add('unknown');
+  cachedSources = { fetchedAt: Date.now(), slugs };
+  return slugs;
+}
 
 Deno.serve(async (req) => {
   const pre = preflight(req);
@@ -26,12 +58,16 @@ Deno.serve(async (req) => {
   // opt out via WEBHOOK_ALLOW_UNSIGNED=true.
   const secret = env.intakeWebhookSecret();
   if (!secret) {
+    // Fail closed unless explicitly opted out (dev/local).
     if (optional('WEBHOOK_ALLOW_UNSIGNED') !== 'true') {
       log.error('intake_webhook_misconfigured', { fn: 'leads-intake', correlationId });
       return jsonResponse(req, { error: 'Webhook not configured' }, 503);
     }
   } else {
-    const valid = await verifyHmacHeader(req, rawBody, secret, 'x-karnaf-signature');
+    // Accept both x-karnaf-signature (canonical) and x-intake-signature
+    // (legacy — integration test harness + some pre-prod callers). Drop
+    // the legacy name after the next deploy cycle.
+    const valid = await verifyHmacHeader(req, rawBody, secret, ['x-karnaf-signature', 'x-intake-signature']);
     if (!valid) {
       log.warn('intake_signature_invalid', { fn: 'leads-intake', correlationId });
       return jsonResponse(req, { error: 'Invalid signature' }, 401);
@@ -53,6 +89,19 @@ Deno.serve(async (req) => {
     return jsonResponse(req, { error: 'Rate limit exceeded' }, 429);
   }
 
+  // Request-level idempotency. Prefer an explicit header (Zapier / Make
+  // can be configured to send one) and fall back to a SHA-256 of the
+  // body so plain retries within the TTL still de-dup.
+  const explicitIdempotencyKey = req.headers.get('idempotency-key')?.trim() || null;
+  const idempotencyKey = `intake:${explicitIdempotencyKey ?? (await hashBody(rawBody))}`;
+  const cached = await getWebhookIdempotencyResponse(supabase, idempotencyKey);
+  if (cached) {
+    log.info('intake_idempotency_hit', {
+      fn: 'leads-intake', correlationId, key: idempotencyKey, explicit: !!explicitIdempotencyKey,
+    });
+    return jsonResponse(req, { ...cached, idempotent: true });
+  }
+
   const phoneRaw = (payload.phone ?? payload.mobile) as string | undefined;
   const phone = normalizeIsraeliPhone(phoneRaw ?? null);
   const emailRaw = typeof payload.email === 'string' ? payload.email.trim() : null;
@@ -63,7 +112,8 @@ Deno.serve(async (req) => {
   }
 
   const sourceInput = String(payload.source ?? 'unknown').toLowerCase();
-  const source = ALLOWED_SOURCES.has(sourceInput) ? sourceInput : 'unknown';
+  const allowedSources = await loadAllowedSources(supabase);
+  const source = allowedSources.has(sourceInput) ? sourceInput : 'unknown';
 
   const lead = await upsertLead(supabase, {
     phone: phone ?? null,
@@ -110,5 +160,13 @@ Deno.serve(async (req) => {
   });
 
   log.info('lead_intake_accepted', { fn: 'leads-intake', correlationId, leadId: lead.id, source });
-  return jsonResponse(req, { ok: true, leadId: lead.id, correlationId });
+  const response = { ok: true as const, leadId: lead.id, correlationId };
+  // Fire-and-forget the idempotency write; failure here doesn't change
+  // the caller-visible behaviour (worst case: duplicate work on retry).
+  storeWebhookIdempotencyResponse(supabase, idempotencyKey, 'intake', response).catch(
+    (err) => log.error('intake_idempotency_store_failed', {
+      fn: 'leads-intake', correlationId, err: String(err),
+    }),
+  );
+  return jsonResponse(req, response);
 });

@@ -18,6 +18,8 @@ type ActionName =
   | 'log_phone_call'
   | 'update_lead_meta';
 
+const REOPEN_TARGETS = new Set(['responded', 'qualified', 'nurture', 'human_handoff']);
+
 // Per-action role allowlist. Sales reps can only log their own calls and
 // resolve queue items; lifecycle transitions (won/lost/dnc/handoff) and
 // ownership re-routing belong to Mia / admins / owners.
@@ -28,7 +30,10 @@ const ACTION_ROLES: Record<ActionName, StaffRole[]> = {
   mark_dnc: ['owner', 'admin', 'mia'],
   mark_lost: ['owner', 'admin', 'mia'],
   mark_won: ['owner', 'admin', 'mia'],
-  reopen_lead: ['owner', 'admin', 'mia'],
+  // Reopening a closed (won/lost) lead is an audited override. Per product
+  // call, restricted to owner/admin — Mia escalates to them rather than
+  // ping-ponging closed states on her own.
+  reopen_lead: ['owner', 'admin'],
   resolve_queue: ['owner', 'admin', 'mia', 'sales_rep'],
   log_phone_call: ['owner', 'admin', 'mia', 'sales_rep'],
   update_lead_meta: ['owner', 'admin', 'mia'],
@@ -40,6 +45,7 @@ interface ActionPayload {
   conversationId?: string | null;
   queueItemId?: string;
   note?: string | null;
+  targetStatus?: string;
   callOutcome?: 'connected' | 'no_answer' | 'voicemail' | 'declined' | 'callback_requested';
   callDurationMinutes?: number;
   metaUpdates?: {
@@ -103,7 +109,7 @@ Deno.serve(async (req) => {
   }
 
   const body = await req.json().catch(() => ({})) as ActionPayload;
-  const { action, leadId, conversationId, queueItemId, note, callOutcome, callDurationMinutes } = body;
+  const { action, leadId, conversationId, queueItemId, note, targetStatus, callOutcome, callDurationMinutes } = body;
 
   if (!action) return jsonResponse(req, { error: 'Missing action' }, 400);
 
@@ -146,19 +152,23 @@ Deno.serve(async (req) => {
       break;
     }
     case 'return_to_ai': {
-      // ⚠️ Operator-reported bug (2026-05-15): after Mia hits "return to AI",
-      // the ownership flips but the AI has no inbound message to react to,
-      // so it stays silent — the lead falls through the cracks. Fire the
-      // orchestrator immediately so the AI evaluates the current conversation
-      // state and can decide whether to send a follow-up. The orchestrator
-      // is itself idempotent on conversation lock + ownership_mode, so a
-      // racing inbound webhook can't double-fire.
+      // Belt-and-suspenders fix for the "AI stays silent after handback" bug:
+      //  (a) flip ownership back to AI and clear the human owner indicator.
+      //  (b) if Mia's takeover parked the lead in human_handoff, walk it back
+      //      to 'responded' — otherwise the playbook router falls into the
+      //      qualification branch with stale context and may stay silent.
+      //  (c) fire orchestrate-message so the AI evaluates the current
+      //      transcript instead of waiting for the next inbound. The
+      //      orchestrator handles its own lock + ownership recheck.
       await updateLeadFields(supabase, leadId, {
         ownership_mode: 'ai_active',
-        // Clear human ownership so the UI's "owned by" indicator drops
-        // back to "AI", not the operator who just released.
         human_owner_id: null,
       });
+      const { data: currentLead } = await supabase
+        .from('leads').select('lead_status').eq('id', leadId).maybeSingle();
+      if (currentLead?.lead_status === 'human_handoff') {
+        await transitionLeadStatus(supabase, leadId, 'responded', staff.role, 'manual_return_to_ai');
+      }
       await logLeadEvent(supabase, leadId, 'manual_return_to_ai', staff.role, meta, conversationId ?? undefined, staff.userId);
       // Find the active conversation if the caller didn't supply one — we
       // need to fire orchestrate with a conversationId.
@@ -228,25 +238,37 @@ Deno.serve(async (req) => {
       break;
     }
     case 'reopen_lead': {
-      // Operator-driven manual override: the natural state machine treats
-      // won/lost/do_not_contact as terminal, so transition_lead_status() refuses
-      // to walk back. This action bypasses it on purpose — operator decided
-      // the customer is in active conversation again. We keep won_at intact
-      // for analytics/conversion accounting (the lead really did pay), but
-      // clear lost_at + DNC flags so the AI can resume + so reports don't
-      // miscount it as still-lost.
+      // The RPC is the source of truth: it role-gates (owner/admin only),
+      // clears the right timestamps based on the prior state (won_at on a
+      // won lead, lost_at + lost_reason on a lost lead), preserves payments
+      // for accounting truth, and inserts audited lead_reopened +
+      // lead_status_changed events. It also enforces the state machine for
+      // the chosen target.
+      if (!targetStatus || !REOPEN_TARGETS.has(targetStatus)) {
+        return jsonResponse(req, { error: 'Invalid targetStatus for reopen_lead' }, 400);
+      }
+      const { error: reopenErr } = await supabase.rpc('reopen_lead', {
+        p_lead_id: leadId,
+        p_target_status: targetStatus,
+        p_actor_role: staff.role,
+        p_reason: note ?? null,
+        p_actor_user_id: staff.userId,
+      });
+      if (reopenErr) {
+        log.warn('reopen_lead_failed', { fn: 'admin-actions', correlationId, leadId, err: reopenErr.message });
+        return jsonResponse(req, { error: reopenErr.message }, 400);
+      }
+      // Reopen also resets DNC/removed_by_request flags + ownership so the
+      // AI can take the next turn. The RPC focuses on the audited status
+      // change; these side-effects stay here.
       await updateLeadFields(supabase, leadId, {
-        lead_status: 'responded',
         ownership_mode: 'ai_active',
         human_owner_id: null,
         do_not_contact: false,
         removed_by_request: false,
-        lost_at: null,
-        lost_reason: null,
       });
-      await logLeadEvent(supabase, leadId, 'manual_reopen_lead', staff.role, meta, conversationId ?? undefined, staff.userId);
-      // Same orchestrate-fire pattern as return_to_ai so the AI sees the
-      // current message immediately rather than waiting for the next inbound.
+      // Fire orchestrate so the AI engages on the current transcript without
+      // waiting for the next inbound. Mirrors return_to_ai's pattern.
       let cid = conversationId ?? null;
       if (!cid) {
         const { data: conv } = await supabase

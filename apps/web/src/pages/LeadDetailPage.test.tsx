@@ -55,6 +55,9 @@ const lead: LeadDetail = {
   readiness_level: null,
   human_owner_id: null,
   requested_phone_call: false,
+  last_human_touch_at: null,
+  ai_playbook_stage: null,
+  ai_playbook_stage_at: null,
 };
 
 const conversation: ConversationRow = {
@@ -212,12 +215,17 @@ describe('LeadDetailPage', () => {
     expect(screen.getByRole('button', { name: 'שליחה' })).toBeDisabled();
   });
 
-  it('resolves a pending queue item with the resolution note', async () => {
+  it('resolves a pending queue item via the close confirmation dialog', async () => {
     renderDetail();
     fireEvent.click(await screen.findByRole('button', { name: 'סגירה' }));
+    const dialog = await screen.findByRole('alertdialog');
+    const confirm = await waitFor(() =>
+      screen.getAllByRole('button', { name: 'סגירה' }).find((el) => dialog.contains(el))!,
+    );
+    fireEvent.click(confirm);
     await waitFor(() => {
       expect(postQueueResolve).toHaveBeenCalledWith({
-        queueItemId: 'q1', resolutionNote: 'resolved_by_user',
+        queueItemId: 'q1', resolutionNote: null,
       });
     });
   });

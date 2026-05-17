@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
+import clsx from 'clsx';
 import {
   fetchLeadDetail, postAdminAction, postSendReply, postQueueResolve,
-  type AdminAction, type CallOutcome, type LeadMetaUpdates, type HumanOwnerProfile,
+  type AdminAction, type CallOutcome, type LeadMetaUpdates, type ReopenTarget,
+  type HumanOwnerProfile,
 } from '@/lib/api';
 import { HeatBadge, OwnershipBadge, StatusBadge } from '@/components/Badge';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { EmptyState } from '@/components/EmptyState';
+import { LeadDetailSkeleton } from '@/components/Skeleton';
 import { t } from '@/lib/i18n';
 import { QUEUE_LABELS, formatDateTime, formatRelative } from '@/lib/format';
 import type { LeadFit, LeadHeat, MessageRow, ReadinessLevel } from '@/lib/types';
@@ -101,6 +105,28 @@ export function LeadDetailPage() {
     | { action: AdminAction; note?: string; label: string; description: string; destructive: boolean }
     | null
   >(null);
+  const [pendingQueueClose, setPendingQueueClose] = useState<{ id: string; label: string } | null>(null);
+  const [queueCloseNote, setQueueCloseNote] = useState('');
+  const [reopenOpen, setReopenOpen] = useState(false);
+  const [reopenTarget, setReopenTarget] = useState<ReopenTarget>('responded');
+  const [reopenNote, setReopenNote] = useState('');
+
+  const reopen = useMutation({
+    mutationFn: (input: { targetStatus: ReopenTarget; note: string | null }) =>
+      postAdminAction({
+        action: 'reopen_lead',
+        leadId,
+        targetStatus: input.targetStatus,
+        note: input.note,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['lead-detail', leadId] });
+      toast.success('הליד נפתח מחדש');
+      setReopenOpen(false);
+      setReopenNote('');
+    },
+    onError: (err) => toast.error((err as Error).message),
+  });
 
   const updateMeta = useMutation({
     mutationFn: (updates: LeadMetaUpdates) =>
@@ -113,7 +139,7 @@ export function LeadDetailPage() {
   });
   const canEditMeta = auth.role === 'owner' || auth.role === 'admin' || auth.role === 'mia';
 
-  if (detailQ.isLoading) return <p className="text-slate-500">{t('loading')}</p>;
+  if (detailQ.isLoading) return <LeadDetailSkeleton />;
   if (detailQ.error) return <p className="text-rose-600">{t('error_prefix')}: {(detailQ.error as Error).message}</p>;
   if (!detailQ.data) return null;
 
@@ -124,19 +150,23 @@ export function LeadDetailPage() {
       <Link to="/leads" className="inline-flex items-center gap-1 text-sm text-brand-700 hover:underline">← חזרה לרשימה</Link>
 
       <header className="kf-card p-4 sm:p-5">
+        {/* Identity zone: who is this lead. */}
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">{lead.full_name || 'ליד ללא שם'}</h1>
-          <StatusBadge status={lead.lead_status} />
-          <HeatBadge heat={lead.lead_heat} />
-          <OwnershipBadge ownership={lead.ownership_mode} />
-          <span className="kf-badge kf-badge-mute">ציון {lead.lead_score}</span>
           {lead.do_not_contact ? <span className="kf-badge bg-rose-100 text-rose-700">DNC</span> : null}
           {lead.removed_by_request ? <span className="kf-badge bg-rose-100 text-rose-700">הוסר לבקשתו</span> : null}
         </div>
-        {/* ⚠️ Operator-reported bug (2026-05-15): customers were getting AI
-            replies, then handed off, then nobody responded — partly because
-            it wasn't visible WHO owned the lead at any given moment. This
-            row is the single source-of-truth answer. */}
+        {/* AI playbook subtitle: where in the script the bot currently is. */}
+        {lead.ai_playbook_stage ? (
+          <p className="mt-1 text-xs text-slate-500">
+            <span className="opacity-70">שלב AI:</span>{' '}
+            <span className="font-medium text-slate-700">{PLAYBOOK_LABELS[lead.ai_playbook_stage] ?? lead.ai_playbook_stage}</span>
+            {lead.ai_playbook_stage_at ? <span> · עודכן {formatRelative(lead.ai_playbook_stage_at)}</span> : null}
+          </p>
+        ) : null}
+
+        {/* Single-line "who owns this right now" indicator (AI or named human),
+            kept above the metadata grid so it's always visible at a glance. */}
         <CurrentOwnerLine ownershipMode={lead.ownership_mode} humanOwner={humanOwnerProfile} />
 
         <dl className="mt-3 grid grid-cols-1 gap-x-6 gap-y-1 text-sm text-slate-600 sm:grid-cols-2 lg:grid-cols-3">
@@ -147,6 +177,20 @@ export function LeadDetailPage() {
           <DataRow label="נכנס לאחרונה" value={formatRelative(lead.last_inbound_at)} />
           <DataRow label="יצא לאחרונה" value={formatRelative(lead.last_outbound_at)} />
         </dl>
+
+        <hr className="my-3 border-slate-100" />
+
+        {/* State zone: status / who handles / heat / next action. */}
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          <StatusBadge status={lead.lead_status} />
+          <OwnershipBadge ownership={lead.ownership_mode} />
+          <HeatBadge heat={lead.lead_heat} />
+          <span className="kf-badge kf-badge-mute">ציון {lead.lead_score}</span>
+          <NextActionBadge
+            actionType={lead.next_action_type}
+            dueAt={lead.next_action_due_at}
+          />
+        </div>
 
         {/* Lifecycle/ownership transitions are restricted server-side to
             owner / admin / mia; hide them for sales_rep so the UI matches. */}
@@ -189,6 +233,16 @@ export function LeadDetailPage() {
               >
                 סימון כאבוד
               </button>
+              {(lead.lead_status === 'won' || lead.lead_status === 'lost') &&
+              (auth.role === 'owner' || auth.role === 'admin') ? (
+                <button
+                  type="button"
+                  className="kf-btn"
+                  onClick={() => setReopenOpen(true)}
+                >
+                  פתיחה מחדש
+                </button>
+              ) : null}
             </ActionGroup>
             <ActionGroup label="הסרה">
               <button
@@ -245,6 +299,10 @@ export function LeadDetailPage() {
               </a>
             ) : null}
           </div>
+          <HandlerBanner
+            ownership={lead.ownership_mode}
+            lastHumanTouchAt={lead.last_human_touch_at}
+          />
           <Transcript messages={messages} />
           <ReplyBox
             disabled={!conversationId || lead.do_not_contact || lead.removed_by_request}
@@ -331,18 +389,21 @@ export function LeadDetailPage() {
                 k="מטרה"
                 v={lead.goal_summary}
                 editable={canEditMeta}
+                saving={updateMeta.isPending && 'goal_summary' in (updateMeta.variables ?? {})}
                 onSave={(next) => updateMeta.mutate({ goal_summary: next })}
               />
               <EditableRow
                 k="כאב מרכזי"
                 v={lead.pain_point_summary}
                 editable={canEditMeta}
+                saving={updateMeta.isPending && 'pain_point_summary' in (updateMeta.variables ?? {})}
                 onSave={(next) => updateMeta.mutate({ pain_point_summary: next })}
               />
               <EditableRow
                 k="חסם עיקרי"
                 v={lead.main_blocker}
                 editable={canEditMeta}
+                saving={updateMeta.isPending && 'main_blocker' in (updateMeta.variables ?? {})}
                 onSave={(next) => updateMeta.mutate({ main_blocker: next })}
               />
               <EditableRow
@@ -355,6 +416,7 @@ export function LeadDetailPage() {
                 k="פעולה הבאה"
                 v={lead.next_action_type}
                 editable={canEditMeta}
+                saving={updateMeta.isPending && 'next_action_type' in (updateMeta.variables ?? {})}
                 onSave={(next) => updateMeta.mutate({ next_action_type: next })}
               />
               <Row k="עד" v={lead.next_action_due_at ? formatDateTime(lead.next_action_due_at) : null} />
@@ -387,7 +449,10 @@ export function LeadDetailPage() {
                       <button
                         type="button"
                         className="kf-btn mt-2 text-xs"
-                        onClick={() => resolveQueue.mutate({ queueItemId: q.id, note: 'resolved_by_user' })}
+                        onClick={() => {
+                          setPendingQueueClose({ id: q.id, label: QUEUE_LABELS[q.queue_type] ?? q.queue_type });
+                          setQueueCloseNote('');
+                        }}
                       >
                         סגירה
                       </button>
@@ -451,6 +516,71 @@ export function LeadDetailPage() {
           setPendingAction(null);
         }}
       />
+
+      <ConfirmDialog
+        open={!!pendingQueueClose}
+        title={`סגירת פריט תור — ${pendingQueueClose?.label ?? ''}`}
+        description="ניתן להוסיף סיבת סגירה לצרכי תיעוד (אופציונלי)."
+        confirmLabel="סגירה"
+        busy={resolveQueue.isPending}
+        onCancel={() => setPendingQueueClose(null)}
+        onConfirm={() => {
+          if (!pendingQueueClose) return;
+          const note = queueCloseNote.trim();
+          resolveQueue.mutate({ queueItemId: pendingQueueClose.id, note: note.length ? note : undefined });
+          setPendingQueueClose(null);
+        }}
+      >
+        <label className="block text-sm">
+          <span className="text-slate-600">סיבת סגירה</span>
+          <textarea
+            className="kf-input mt-1 min-h-[64px]"
+            placeholder="לדוגמה: ליד חזר ונענה, פוטר אוטומטית..."
+            value={queueCloseNote}
+            onChange={(e) => setQueueCloseNote(e.target.value.slice(0, 500))}
+            maxLength={500}
+          />
+        </label>
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={reopenOpen}
+        title="פתיחת ליד מחדש"
+        description="הליד יחזור לסטטוס פעיל. won_at/lost_at יתאפסו; תשלומים שכבר נרשמו יישארו לתיעוד."
+        confirmLabel="פתיחה מחדש"
+        busy={reopen.isPending}
+        onCancel={() => setReopenOpen(false)}
+        onConfirm={() => {
+          const note = reopenNote.trim();
+          reopen.mutate({ targetStatus: reopenTarget, note: note.length ? note : null });
+        }}
+      >
+        <div className="space-y-3">
+          <label className="block text-sm">
+            <span className="text-slate-600">סטטוס יעד</span>
+            <select
+              className="kf-input mt-1"
+              value={reopenTarget}
+              onChange={(e) => setReopenTarget(e.target.value as ReopenTarget)}
+            >
+              <option value="responded">הגיב</option>
+              <option value="qualified">מוסמך</option>
+              <option value="nurture">בליווי</option>
+              <option value="human_handoff">העברה לאנושי</option>
+            </select>
+          </label>
+          <label className="block text-sm">
+            <span className="text-slate-600">סיבה (אופציונלי)</span>
+            <textarea
+              className="kf-input mt-1 min-h-[64px]"
+              placeholder="לדוגמה: סווג בטעות, הלקוח חזר, אי-הבנה..."
+              value={reopenNote}
+              onChange={(e) => setReopenNote(e.target.value.slice(0, 500))}
+              maxLength={500}
+            />
+          </label>
+        </div>
+      </ConfirmDialog>
     </div>
   );
 }
@@ -460,6 +590,66 @@ function ActionGroup({ label, children }: { label: string; children: React.React
     <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/50 p-1.5">
       <span className="w-full px-2 text-xs text-slate-500 sm:w-auto">{label}</span>
       {children}
+    </div>
+  );
+}
+
+function NextActionBadge({
+  actionType, dueAt,
+}: { actionType: string | null; dueAt: string | null }) {
+  if (!actionType && !dueAt) return null;
+  const dueMs = dueAt ? Date.parse(dueAt) : NaN;
+  const overdue = Number.isFinite(dueMs) && dueMs < Date.now();
+  const tone = overdue
+    ? 'bg-rose-100 text-rose-800 ring-1 ring-inset ring-rose-200'
+    : 'bg-emerald-50 text-emerald-800 ring-1 ring-inset ring-emerald-200';
+  return (
+    <span
+      className={clsx('kf-badge', tone)}
+      title={dueAt ? new Date(dueAt).toLocaleString('he-IL') : undefined}
+      aria-live={overdue ? 'polite' : undefined}
+    >
+      {overdue ? '⚠️ ' : '⏭ '}
+      {actionType ? `הבא: ${actionType}` : 'הבא'}
+      {dueAt ? ` · ${formatRelative(dueAt)}` : ''}
+      {overdue ? ' · באיחור' : ''}
+    </span>
+  );
+}
+
+function HandlerBanner({
+  ownership, lastHumanTouchAt,
+}: {
+  ownership: import('@/lib/types').OwnershipMode;
+  lastHumanTouchAt: string | null;
+}) {
+  const cfg = (() => {
+    switch (ownership) {
+      case 'ai_active':
+        return { tone: 'bg-violet-50 text-violet-800 ring-violet-200', icon: '🤖', label: 'AI מטפל בליד', detail: 'הבוט עונה אוטומטית להודעות נכנסות.' };
+      case 'mia_active':
+        return { tone: 'bg-amber-50 text-amber-800 ring-amber-200', icon: '👤', label: 'מיה מטפלת', detail: lastHumanTouchAt ? `מגע אנושי אחרון ${formatRelative(lastHumanTouchAt)}` : 'הליד הועבר לטיפול ידני.' };
+      case 'phone_sales_pending':
+        return { tone: 'bg-orange-50 text-orange-800 ring-orange-200', icon: '📞', label: 'ממתין לשיחת טלפון', detail: 'הליד סומן להתקשרות יזומה.' };
+      case 'shared_watch':
+        return { tone: 'bg-slate-100 text-slate-700 ring-slate-200', icon: '👁️', label: 'במעקב משותף', detail: 'אין מטפל פעיל; הצוות עוקב.' };
+      case 'suppressed':
+        return { tone: 'bg-rose-50 text-rose-800 ring-rose-200', icon: '🚫', label: 'ליד מנותק', detail: 'לא נשלחות הודעות אוטומטיות.' };
+      default:
+        return { tone: 'bg-slate-100 text-slate-700 ring-slate-200', icon: '•', label: ownership, detail: '' };
+    }
+  })();
+  return (
+    <div
+      className={clsx(
+        'sticky top-0 z-10 mt-3 flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium ring-1 ring-inset',
+        cfg.tone,
+      )}
+      aria-live="polite"
+    >
+      <span aria-hidden="true" className="text-base leading-none">{cfg.icon}</span>
+      <span>{cfg.label}</span>
+      {cfg.detail ? <span className="text-xs font-normal opacity-80">· {cfg.detail}</span> : null}
     </div>
   );
 }
@@ -474,11 +664,12 @@ function Row({ k, v }: { k: string; v: string | null | undefined }) {
 }
 
 function EditableRow({
-  k, v, editable, onSave,
+  k, v, editable, saving = false, onSave,
 }: {
   k: string;
   v: string | null | undefined;
   editable: boolean;
+  saving?: boolean;
   onSave: (next: string | null) => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -488,21 +679,36 @@ function EditableRow({
     if (!editing) setDraft(v ?? '');
   }, [v, editing]);
 
+  // While a save is in-flight, exit edit mode so the row goes back to display
+  // with a spinner overlay; on success the parent invalidates the query.
+  useEffect(() => {
+    if (saving) setEditing(false);
+  }, [saving]);
+
   if (!editable) return <Row k={k} v={v} />;
 
   if (!editing) {
     return (
-      <div className="grid grid-cols-3 items-center gap-2">
+      <div className={clsx('grid grid-cols-3 items-center gap-2', saving && 'opacity-60')}>
         <dt className="col-span-1 text-slate-500">{k}</dt>
         <dd className="col-span-2 flex items-center gap-2 text-slate-800">
           <span className="min-w-0 flex-1 truncate">{v || '—'}</span>
-          <button
-            type="button"
-            className="text-xs text-brand-700 hover:underline"
-            onClick={() => setEditing(true)}
-          >
-            עריכה
-          </button>
+          {saving ? (
+            <span className="inline-flex items-center gap-1 text-xs text-slate-500" aria-live="polite">
+              <svg viewBox="0 0 20 20" className="h-3 w-3 animate-spin" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M10 2a8 8 0 1 1-8 8" strokeLinecap="round" />
+              </svg>
+              שומר...
+            </span>
+          ) : (
+            <button
+              type="button"
+              className="text-xs text-brand-700 hover:underline"
+              onClick={() => setEditing(true)}
+            >
+              עריכה
+            </button>
+          )}
         </dd>
       </div>
     );
@@ -523,7 +729,6 @@ function EditableRow({
             if (e.key === 'Enter') {
               const next = draft.trim();
               onSave(next.length ? next : null);
-              setEditing(false);
             }
           }}
         />
@@ -533,7 +738,6 @@ function EditableRow({
           onClick={() => {
             const next = draft.trim();
             onSave(next.length ? next : null);
-            setEditing(false);
           }}
         >
           שמירה
@@ -632,6 +836,18 @@ function ContactRow({ label, value, kind }: { label: string; value: string | nul
 
 const dayFormatter = new Intl.DateTimeFormat('he-IL', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' });
 
+const PLAYBOOK_LABELS: Record<string, string> = {
+  first_contact_whatsapp_inbound: 'מענה ראשון — WhatsApp/IG',
+  first_contact_form_lead: 'מענה ראשון — טופס',
+  qualification: 'איתור צרכים',
+  price_objection: 'התנגדות מחיר',
+  free_advice_boundary: 'גבול ייעוץ חינמי',
+  checkout_push: 'דחיפה לרכישה',
+  payment_pending_rescue: 'חילוץ תשלום ממתין',
+  phone_request: 'בקשה לשיחה',
+  opt_out: 'בקשת הסרה',
+};
+
 function Transcript({ messages }: { messages: MessageRow[] }) {
   const grouped = useMemo(() => groupByDay(messages), [messages]);
   const bottomRef = useRef<HTMLLIElement | null>(null);
@@ -642,7 +858,15 @@ function Transcript({ messages }: { messages: MessageRow[] }) {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: 'end', behavior: 'auto' });
   }, [messages.length]);
-  if (messages.length === 0) return <p className="mt-2 text-sm text-slate-500">אין הודעות.</p>;
+  if (messages.length === 0) {
+    return (
+      <EmptyState
+        icon="💬"
+        title="אין עדיין הודעות בשיחה"
+        hint="כשהלקוח ישלח הודעה ראשונה, היא תופיע כאן."
+      />
+    );
+  }
   return (
     <ol className="mt-3 max-h-[60vh] space-y-3 overflow-auto pr-1 sm:max-h-[28rem]">
       {grouped.map(({ day, items }) => (
@@ -659,11 +883,16 @@ function Transcript({ messages }: { messages: MessageRow[] }) {
                   <span className="font-medium text-slate-700">{senderLabel(m.sender_type)}</span>
                   <span>·</span>
                   <span title={m.created_at}>{formatRelative(m.created_at)}</span>
-                  {m.provider_status ? <span className="kf-badge kf-badge-mute">{m.provider_status}</span> : null}
+                  <ProviderStatusBadge status={m.provider_status} error={m.provider_error} />
                 </div>
                 <div className="mt-1 whitespace-pre-wrap text-sm">
                   {m.content_text || (m.message_type === 'media' ? '[מדיה]' : '—')}
                 </div>
+                {m.provider_status === 'failed' && m.provider_error ? (
+                  <div className="mt-2 rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-xs text-rose-800">
+                    שגיאת ספק: {m.provider_error}
+                  </div>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -699,9 +928,36 @@ function senderLabel(t: MessageRow['sender_type']): string {
 
 function messageBubbleClass(m: MessageRow): string {
   const base = 'rounded-2xl p-3 max-w-[85%] shadow-sm';
-  if (m.direction === 'inbound') return `${base} bg-slate-100 mr-auto`;
-  if (m.sender_type === 'ai') return `${base} bg-brand-50 ms-auto`;
-  return `${base} bg-amber-50 ms-auto`;
+  const failedRing = m.provider_status === 'failed' ? ' ring-1 ring-rose-300' : '';
+  if (m.direction === 'inbound') return `${base} bg-slate-100 mr-auto${failedRing}`;
+  if (m.sender_type === 'ai') return `${base} bg-brand-50 ms-auto${failedRing}`;
+  return `${base} bg-amber-50 ms-auto${failedRing}`;
+}
+
+const PROVIDER_STATUS_LABELS: Record<NonNullable<MessageRow['provider_status']>, string> = {
+  queued: 'בתור',
+  sent: 'נשלח',
+  delivered: 'התקבל',
+  read: 'נקרא',
+  failed: 'נכשל',
+};
+
+function ProviderStatusBadge({
+  status, error,
+}: { status: MessageRow['provider_status']; error: string | null }) {
+  if (!status) return null;
+  if (status === 'failed') {
+    return (
+      <span
+        className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-semibold text-rose-700"
+        title={error || 'נכשל בשליחה'}
+      >
+        <span aria-hidden="true">⚠</span>
+        {PROVIDER_STATUS_LABELS[status]}
+      </span>
+    );
+  }
+  return <span className="kf-badge kf-badge-mute">{PROVIDER_STATUS_LABELS[status]}</span>;
 }
 
 function waLink(phone: string): string {

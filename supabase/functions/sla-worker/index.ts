@@ -39,8 +39,15 @@ Deno.serve(async (req) => {
   const breach = new Date(now - config.slaThresholds.firstResponseBreachHours * 3600 * 1000).toISOString();
   const paymentBreach = new Date(now - config.slaThresholds.paymentPendingHours * 3600 * 1000).toISOString();
   const dormantBreach = new Date(now - (config.followUpDelays.nurtureHours * 7) * 3600 * 1000).toISOString();
+  // Stuck-AI threshold: catches conversations where the AI dispatch failed
+  // silently (provider error, validation block, etc.) before SLA warn fires.
+  // Conservative default — 20 minutes — well under the 8h SLA warn.
+  const stuckMinutes = 20;
+  const stuck = new Date(now - stuckMinutes * 60 * 1000).toISOString();
 
-  const counters: Record<string, number> = { sla_risk: 0, sla_breach: 0, payment_pending: 0, dormant: 0 };
+  const counters: Record<string, number> = {
+    sla_risk: 0, sla_breach: 0, payment_pending: 0, dormant: 0, ai_stuck: 0,
+  };
   const queryErrors: Array<{ stage: string; message: string }> = [];
 
   const { data: slaRiskLeads, error: slaRiskErr } = await supabase
@@ -102,6 +109,33 @@ Deno.serve(async (req) => {
     counters.payment_pending++;
   }
 
+  // AI-stuck: customer wrote, ownership says AI should be replying, but more
+  // than `stuckMinutes` have passed without an outbound. Distinct from the
+  // 8h SLA risk above: this catches silent AI drops (provider errors,
+  // validation blocks) early enough for a human to intervene before the
+  // customer cools off.
+  const { data: stuckAiLeads, error: stuckErr } = await supabase
+    .from('leads')
+    .select('id')
+    .eq('ownership_mode', 'ai_active')
+    .lt('last_inbound_at', stuck)
+    .or('last_outbound_at.is.null,last_outbound_at.lt.last_inbound_at')
+    .eq('do_not_contact', false)
+    .eq('removed_by_request', false);
+  if (stuckErr) {
+    queryErrors.push({ stage: 'ai_stuck_query', message: stuckErr.message });
+    log.error('ai_stuck_query_failed', { fn: 'sla-worker', correlationId, err: stuckErr.message });
+  }
+  for (const lead of stuckAiLeads ?? []) {
+    await ensurePendingQueueItem(supabase, {
+      leadId: lead.id, queueType: 'ai_stuck', priorityLevel: 2,
+      reason: `AI לא הגיב תוך ${stuckMinutes} דק׳ — נדרשת בדיקה`,
+      payloadJson: { correlationId, threshold: 'ai_stuck', stuckMinutes },
+    });
+    counters.ai_stuck++;
+  }
+
+  // Dormant: nurture leads idle for > 7 nurtureHours.
   const { data: dormantLeads, error: dormantErr } = await supabase
     .from('leads')
     .select('id, lead_status')
@@ -121,9 +155,10 @@ Deno.serve(async (req) => {
     counters.dormant++;
   }
 
-  if (counters.sla_breach > 0 || counters.payment_pending > 0) {
+  if (counters.sla_breach > 0 || counters.payment_pending > 0 || counters.ai_stuck > 0) {
     const lines: string[] = [];
     if (counters.sla_breach > 0) lines.push(`• פריצת SLA: ${counters.sla_breach} לידים ללא מענה`);
+    if (counters.ai_stuck > 0) lines.push(`• AI תקוע: ${counters.ai_stuck} לידים מחכים מעל ${stuckMinutes} דק׳`);
     if (counters.payment_pending > 0) lines.push(`• תשלום תקוע: ${counters.payment_pending} לידים`);
     if (counters.sla_risk > 0) lines.push(`• סיכון SLA: ${counters.sla_risk} לידים מתקרבים לסף`);
     if (counters.dormant > 0) lines.push(`• הועברו ל-dormant: ${counters.dormant}`);

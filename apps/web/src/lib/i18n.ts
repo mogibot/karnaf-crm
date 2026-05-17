@@ -13,10 +13,13 @@ const HE = {
   // Navigation
   nav_dashboard: 'מסך מצב',
   nav_leads: 'לידים',
+  nav_inbox: 'דורש תשומת לב',
   nav_queue: 'תורי עבודה',
   nav_analytics: 'אנליטיקה',
   nav_users: 'משתמשים',
   nav_prompts: 'תבניות AI',
+  nav_team: 'צוות',
+  nav_sources: 'מקורות',
 
   // Queue
   queue_title: 'תורי עבודה',
@@ -171,10 +174,13 @@ const EN: Partial<Record<keyof typeof HE, string>> = {
   skip_to_main: 'Skip to main content',
   nav_dashboard: 'Dashboard',
   nav_leads: 'Leads',
+  nav_inbox: 'Needs attention',
   nav_queue: 'Queues',
   nav_analytics: 'Analytics',
   nav_users: 'Users',
   nav_prompts: 'AI Prompts',
+  nav_team: 'Team',
+  nav_sources: 'Sources',
   queue_title: 'Queues',
   queue_total_items: 'items',
   queue_open: 'Open',

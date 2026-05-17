@@ -1,7 +1,7 @@
 import { supabase } from './supabase';
 import type {
-  ConversationRow, DashboardSummary, EventRow, LeadDetail, LeadFit, LeadHeat,
-  LeadRow, MessageRow, QueueRow, ReadinessLevel, TaskRow,
+  AttentionRow, ConversationRow, DashboardSummary, EventRow, LeadDetail, LeadFit,
+  LeadHeat, LeadRow, MessageRow, QueueRow, ReadinessLevel, TaskRow,
 } from './types';
 
 const baseUrl = import.meta.env.VITE_FUNCTIONS_BASE_URL || '/functions/v1';
@@ -96,12 +96,19 @@ export async function fetchQueueList(params: { queueType?: string; status?: stri
   return r.queueItems;
 }
 
+export async function fetchAttentionInbox(limit?: number) {
+  const r = await getJson<{ ok: true; items: AttentionRow[] }>('/attention-inbox', limit ? { limit } : undefined);
+  return r.items;
+}
+
 // === Writes ===============================================================
 
 export type AdminAction =
   | 'assign_to_mia' | 'return_to_ai' | 'mark_phone_escalation'
   | 'mark_dnc' | 'mark_lost' | 'mark_won' | 'reopen_lead'
   | 'resolve_queue' | 'log_phone_call' | 'update_lead_meta';
+
+export type ReopenTarget = 'responded' | 'qualified' | 'nurture' | 'human_handoff';
 
 export type CallOutcome = 'connected' | 'no_answer' | 'voicemail' | 'declined' | 'callback_requested';
 
@@ -128,6 +135,7 @@ export async function postAdminAction(payload: {
   conversationId?: string | null;
   queueItemId?: string;
   note?: string | null;
+  targetStatus?: ReopenTarget;
   callOutcome?: CallOutcome;
   callDurationMinutes?: number;
   metaUpdates?: LeadMetaUpdates;
@@ -141,6 +149,19 @@ export async function postSendReply(payload: { leadId: string; conversationId: s
 
 export async function postQueueResolve(payload: { queueItemId: string; resolutionNote?: string | null }) {
   return postJson<{ ok: true }>('/queue-resolve', payload);
+}
+
+export type BulkLeadAction = 'assign_owner' | 'change_heat';
+
+export interface BulkLeadActionPayload {
+  action: BulkLeadAction;
+  leadIds: string[];
+  assigneeUserId?: string;
+  heat?: 'hot' | 'warm' | 'cool' | 'cold';
+}
+
+export async function postBulkLeadAction(payload: BulkLeadActionPayload) {
+  return postJson<{ ok: true; updated: number }>('/bulk-lead-actions', { ...payload });
 }
 
 // === Analytics ============================================================
@@ -238,6 +259,48 @@ export async function postUpdateUser(payload: {
   userId: string; role?: ProfileRow['role']; isActive?: boolean; fullName?: string | null;
 }) {
   return postJson<{ ok: true; profile: ProfileRow }>('/users-manage', { action: 'update', ...payload });
+}
+
+export interface TeamMember {
+  user_id: string;
+  email: string | null;
+  full_name: string | null;
+  role: ProfileRow['role'];
+  is_active: boolean;
+  active_leads_owned: number;
+  recent_touches_7d: number;
+  last_active_at: string | null;
+}
+
+export async function fetchTeamWorkload() {
+  const r = await getJson<{ ok: true; members: TeamMember[] }>('/team-workload');
+  return r.members;
+}
+
+export interface LeadSource {
+  slug: string;
+  display_name: string;
+  is_active: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function fetchLeadSources() {
+  const r = await getJson<{ ok: true; sources: LeadSource[] }>('/lead-sources');
+  return r.sources;
+}
+
+export async function postCreateLeadSource(payload: { slug: string; display_name: string; sort_order?: number }) {
+  return postJson<{ ok: true; source: LeadSource }>('/lead-sources', { action: 'create', ...payload });
+}
+
+export async function postUpdateLeadSource(payload: { slug: string; display_name?: string; is_active?: boolean; sort_order?: number }) {
+  return postJson<{ ok: true; source: LeadSource }>('/lead-sources', { action: 'update', ...payload });
+}
+
+export async function postDeleteLeadSource(slug: string) {
+  return postJson<{ ok: true }>('/lead-sources', { action: 'delete', slug });
 }
 
 // === Prompt variants =====================================================

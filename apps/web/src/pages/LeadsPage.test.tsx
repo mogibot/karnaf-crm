@@ -2,14 +2,27 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { AuthContext, type AuthState, type Role } from '@/auth/auth-context';
 import type { LeadRow } from '@/lib/types';
 import { LeadsPage } from './LeadsPage';
 
 vi.mock('@/lib/api', () => ({
   fetchLeadsList: vi.fn(),
+  fetchUsersList: vi.fn(),
+  postBulkLeadAction: vi.fn(),
 }));
 
-import { fetchLeadsList, type LeadsListParams } from '@/lib/api';
+import { fetchLeadsList, fetchUsersList, postBulkLeadAction, type LeadsListParams } from '@/lib/api';
+
+function makeAuth(role: Role | null): AuthState {
+  return {
+    session: null, user: null, role, loading: false,
+    signIn: async () => ({ error: null }),
+    signInWithGoogle: async () => ({ error: null }),
+    signUp: async () => ({ error: null, needsEmailConfirmation: true }),
+    signOut: async () => {},
+  } as AuthState;
+}
 
 function makeLead(over: Partial<LeadRow> = {}): LeadRow {
   return {
@@ -35,18 +48,20 @@ function makeLead(over: Partial<LeadRow> = {}): LeadRow {
 }
 
 function makeClient() {
-  return new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
 }
 
-function renderLeads() {
+function renderLeads(role: Role | null = 'admin') {
   return render(
     <QueryClientProvider client={makeClient()}>
-      <MemoryRouter initialEntries={['/leads']}>
-        <Routes>
-          <Route path="/leads" element={<LeadsPage />} />
-          <Route path="/leads/:leadId" element={<div>lead detail</div>} />
-        </Routes>
-      </MemoryRouter>
+      <AuthContext.Provider value={makeAuth(role)}>
+        <MemoryRouter initialEntries={['/leads']}>
+          <Routes>
+            <Route path="/leads" element={<LeadsPage />} />
+            <Route path="/leads/:leadId" element={<div>lead detail</div>} />
+          </Routes>
+        </MemoryRouter>
+      </AuthContext.Provider>
     </QueryClientProvider>,
   );
 }
@@ -61,6 +76,17 @@ beforeEach(() => {
     limit: 50,
     offset: 0,
   });
+  vi.mocked(fetchUsersList).mockResolvedValue([
+    {
+      id: 'user-1', email: 'mia@karnaf.co', full_name: 'מיה', role: 'mia',
+      is_active: true, created_at: '', updated_at: '',
+    },
+    {
+      id: 'user-2', email: 'sales@karnaf.co', full_name: 'רון מכירות', role: 'sales_rep',
+      is_active: true, created_at: '', updated_at: '',
+    },
+  ]);
+  vi.mocked(postBulkLeadAction).mockResolvedValue({ ok: true, updated: 2 });
 });
 
 afterEach(() => {
@@ -68,10 +94,10 @@ afterEach(() => {
 });
 
 describe('LeadsPage', () => {
-  it('renders the loading row while leads are being fetched', () => {
+  it('renders the loading skeleton while leads are being fetched', () => {
     vi.mocked(fetchLeadsList).mockImplementation(() => new Promise(() => {}));
     renderLeads();
-    expect(screen.getByText('טוען...')).toBeInTheDocument();
+    expect(screen.getByTestId('leads-skeleton')).toBeInTheDocument();
   });
 
   it('renders leads with deep links to the detail route and total count', async () => {
@@ -121,5 +147,36 @@ describe('LeadsPage', () => {
       const lastCall = vi.mocked(fetchLeadsList).mock.calls.at(-1)?.[0] as LeadsListParams | undefined;
       expect(lastCall?.offset).toBe(50);
     });
+  });
+
+  it('bulk-assigns selected leads to a chosen user', async () => {
+    renderLeads();
+    await screen.findByRole('link', { name: 'דנה כהן' });
+
+    const checkbox = screen.getByLabelText('בחירת דנה כהן') as HTMLInputElement;
+    fireEvent.click(checkbox);
+    await waitFor(() => expect(checkbox.checked).toBe(true));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'שיוך למשתמש' }));
+    const select = await screen.findByRole('combobox', { name: 'בחר משתמש' }) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: 'user-1' } });
+    await waitFor(() => expect(select.value).toBe('user-1'));
+    const confirmBtn = screen.getByRole('button', { name: 'שייך' });
+    await waitFor(() => expect(confirmBtn).not.toBeDisabled());
+    fireEvent.click(confirmBtn);
+
+    await waitFor(() => {
+      expect(vi.mocked(postBulkLeadAction)).toHaveBeenCalled();
+    });
+    expect(vi.mocked(postBulkLeadAction).mock.calls[0]?.[0]).toMatchObject({
+      action: 'assign_owner', leadIds: ['lead-1'], assigneeUserId: 'user-1',
+    });
+  });
+
+  it('hides bulk actions for viewer role', async () => {
+    renderLeads('viewer');
+    await screen.findByRole('link', { name: 'דנה כהן' });
+    expect(screen.queryByRole('button', { name: 'שיוך למשתמש' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('בחירה כללית')).not.toBeInTheDocument();
   });
 });
